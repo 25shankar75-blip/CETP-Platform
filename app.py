@@ -99,24 +99,29 @@ with st.sidebar.expander("💰 4. Financial Unit Rates & Tariffs", expanded=Fals
 # ----------------------------------------------------
 if show_editor:
     st.subheader("📅 Interactive 24-Hour Diurnal Load & ToU Tariff Data Editor")
-    st.info("💡 **Bi-Directional Entry Active:** You can edit **Cooling Load (%)**, **Cooling Load (TR)**, or **Tariff** directly. Press **Enter**, **Tab**, or click outside the cell to trigger instant recalculation.")
+    st.info("💡 **Session-State Delta Tracking Active:** Direct edits to **Cooling Load (%)**, **Cooling Load (TR)**, or **Tariff** across all hours (including Hours 01 & 02) now update dynamically and persist without state loss.")
     
-    # Initialize base dataframe
-    df_init = pd.DataFrame({
-        "Hour": [f"Hour {i+1:02d} ({i:02d}:00)" for i in range(24)],
-        "Cooling Load (%)": DEFAULT_24H_LOAD_PCT,
-        "Cooling Load (TR)": [(p / 100.0) * peak_load_tr for p in DEFAULT_24H_LOAD_PCT],
-        f"Tariff ({sym}/kWh)": [t * mult for t in DEFAULT_24H_TARIFF],
-        "ToU Category": [get_tou_category(t * mult) for t in DEFAULT_24H_TARIFF]
-    })
-    
-    # Interactive Data Editor - Both Load % and Load TR are fully editable
+    # Session State Initialization / Sync for 24h Table
+    if "df_24h" not in st.session_state or st.session_state.get("last_peak_tr") != peak_load_tr or st.session_state.get("last_currency") != currency:
+        st.session_state["df_24h"] = pd.DataFrame({
+            "Hour": [f"Hour {i+1:02d} ({i:02d}:00)" for i in range(24)],
+            "Cooling Load (%)": [float(x) for x in DEFAULT_24H_LOAD_PCT],
+            "Cooling Load (TR)": [(p / 100.0) * peak_load_tr for p in DEFAULT_24H_LOAD_PCT],
+            f"Tariff ({sym}/kWh)": [t * mult for t in DEFAULT_24H_TARIFF],
+            "ToU Category": [get_tou_category(t * mult) for t in DEFAULT_24H_TARIFF]
+        })
+        st.session_state["last_peak_tr"] = peak_load_tr
+        st.session_state["last_currency"] = currency
+
+    df_current = st.session_state["df_24h"].copy()
+
+    # Interactive Data Editor
     edited_df = st.data_editor(
-        df_init,
+        df_current,
         column_config={
             "Hour": st.column_config.TextColumn("Hour of Day", disabled=True),
             "Cooling Load (%)": st.column_config.NumberColumn("Cooling Load (%)", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%"),
-            "Cooling Load (TR)": st.column_config.NumberColumn("Cooling Load (TR)", min_value=0.0, max_value=peak_load_tr*1.5, step=10.0, format="%.2f TR"),
+            "Cooling Load (TR)": st.column_config.NumberColumn("Cooling Load (TR)", min_value=0.0, max_value=peak_load_tr * 2.0, step=10.0, format="%.2f TR"),
             f"Tariff ({sym}/kWh)": st.column_config.NumberColumn(f"Electricity Tariff ({sym}/kWh)", min_value=0.0, step=0.10, format="%.2f"),
             "ToU Category": st.column_config.TextColumn("ToU Window [Auto]", disabled=True)
         },
@@ -124,26 +129,33 @@ if show_editor:
         num_rows="fixed",
         key="data_editor_24h"
     )
-    
-    # BI-DIRECTIONAL DYNAMIC SYNCHRONIZATION
-    for i in range(24):
-        init_pct = df_init.at[i, "Cooling Load (%)"]
-        init_tr = df_init.at[i, "Cooling Load (TR)"]
-        curr_pct = edited_df.at[i, "Cooling Load (%)"]
-        curr_tr = edited_df.at[i, "Cooling Load (TR)"]
-        
-        # Check if TR was edited directly
-        if abs(curr_tr - init_tr) > 1e-3 and abs(curr_pct - init_pct) < 1e-3:
-            edited_df.at[i, "Cooling Load (%)"] = min(100.0, (curr_tr / peak_load_tr) * 100.0) if peak_load_tr > 0 else 0.0
-        # Check if % was edited directly
-        elif abs(curr_pct - init_pct) > 1e-3:
-            edited_df.at[i, "Cooling Load (TR)"] = (curr_pct / 100.0) * peak_load_tr
-            
-    edited_df["ToU Category"] = edited_df[f"Tariff ({sym}/kWh)"].apply(get_tou_category)
-    
+
+    # Process delta edits from Streamlit's editor session state dictionary
+    editor_state = st.session_state.get("data_editor_24h", {})
+    edited_rows = editor_state.get("edited_rows", {})
+
+    if edited_rows:
+        for r_str, row_changes in edited_rows.items():
+            r = int(r_str)
+            if "Cooling Load (%)" in row_changes:
+                new_pct = float(row_changes["Cooling Load (%)"])
+                edited_df.at[r, "Cooling Load (%)"] = new_pct
+                edited_df.at[r, "Cooling Load (TR)"] = (new_pct / 100.0) * peak_load_tr
+            elif "Cooling Load (TR)" in row_changes:
+                new_tr = float(row_changes["Cooling Load (TR)"])
+                edited_df.at[r, "Cooling Load (TR)"] = new_tr
+                edited_df.at[r, "Cooling Load (%)"] = min(100.0, (new_tr / peak_load_tr) * 100.0) if peak_load_tr > 0 else 0.0
+
+            if f"Tariff ({sym}/kWh)" in row_changes:
+                new_tariff = float(row_changes[f"Tariff ({sym}/kWh)"])
+                edited_df.at[r, f"Tariff ({sym}/kWh)"] = new_tariff
+
+        edited_df["ToU Category"] = edited_df[f"Tariff ({sym}/kWh)"].apply(get_tou_category)
+        st.session_state["df_24h"] = edited_df.copy()
+
     load_24_profile = edited_df["Cooling Load (TR)"].tolist()
     tariff_24_profile = edited_df[f"Tariff ({sym}/kWh)"].tolist()
-    
+
     # Summary Feedback Metrics
     col_m1, col_m2, col_m3 = st.columns(3)
     with col_m1:
@@ -152,7 +164,7 @@ if show_editor:
         st.metric("Peak Diurnal Load", f"{max(load_24_profile):,.2f} TR")
     with col_m3:
         st.metric("Weighted Avg Tariff", f"{sym} {np.mean(tariff_24_profile):.2f} / kWh")
-    
+
     # Live Diurnal Chart
     fig_diurnal = make_subplots(specs=[[{"secondary_y": True}]])
     fig_diurnal.add_trace(
@@ -164,9 +176,9 @@ if show_editor:
         secondary_y=True
     )
     fig_diurnal.update_layout(
-        title_text="Live 24-Hour Cooling Load (TR) vs. ToU Electricity Tariff Curve", 
-        height=320, 
-        margin=dict(l=20, r=20, t=40, b=20), 
+        title_text="Live 24-Hour Cooling Load (TR) vs. ToU Electricity Tariff Curve",
+        height=320,
+        margin=dict(l=20, r=20, t=40, b=20),
         legend=dict(orientation="h", y=1.15)
     )
     fig_diurnal.update_xaxes(title_text="Hour of Day (1 - 24)")
@@ -188,7 +200,7 @@ if st.button("🚀 Run 8,760-Hour Optimization Engine", type="primary", use_cont
             # 8,760 Arrays
             l_8760 = expand_24_to_8760(load_24_profile)
             t_8760 = expand_24_to_8760(tariff_24_profile)
-            
+
             project_cfg = ProjectConfig(
                 project_name=proj_name, location=location, sector=sector,
                 scope=scope, currency=currency, peak_load_tr=peak_load_tr, tank_shape=tank_shape
@@ -205,24 +217,24 @@ if st.button("🚀 Run 8,760-Hour Optimization Engine", type="primary", use_cont
             financial_cfg = FinancialConfig(
                 demand_charge_per_kva_month=demand_charge_kva, unit_rates=sys_rates
             )
-            
+
             class SystemConfigContainer:
                 def __init__(self, p, t, h, f):
                     self.project = p
                     self.thermo = t
                     self.hydraulic = h
                     self.financial = f
-                    
+
             config = SystemConfigContainer(project_cfg, thermo_cfg, hydraulic_cfg, financial_cfg)
-            
+
             results = run_8760_simulation(l_8760, t_8760, config, sys_rates)
-            
+
             st.success("✅ 8,760-Hour Optimization Completed! ASHRAE & LEED Platinum Compliant.")
-            
+
             # 1. Executive Summary Cards
             st.subheader("📊 Executive Summary & Technology Comparison")
             col1, col2, col3 = st.columns(3)
-            
+
             for idx, (sys_name, res_data) in enumerate(results.items()):
                 target_col = [col1, col2, col3][idx]
                 with target_col:
@@ -238,7 +250,7 @@ if st.button("🚀 Run 8,760-Hour Optimization Engine", type="primary", use_cont
                     if sys_name != "Conventional N+1":
                         st.metric("Annual OPEX Savings", format_currency(res_data['Annual_OPEX_Savings'], currency))
                         st.metric("Simple Payback Period", f"{res_data['Simple_Payback_Yrs']:.2f} Years")
-            
+
             # 2. Detailed Financial & CAPEX Matrix
             st.subheader("📑 Detailed Techno-Economic Cost Breakdown")
             cost_matrix = []
@@ -256,12 +268,12 @@ if st.button("🚀 Run 8,760-Hour Optimization Engine", type="primary", use_cont
                     "Total Annual OPEX": format_currency(res_data['Total_Annual_OPEX'], currency)
                 })
             st.table(pd.DataFrame(cost_matrix).set_index("System Vector"))
-            
+
             # 3. Plotly Diurnal Dispatch Comparison
             st.subheader("📈 24-Hour Operational Power Dispatch Curves")
             fig_dispatch = go.Figure()
             colors_map = {"Conventional N+1": "#EF4444", "PCM TES System": "#10B981", "Stratified CHW TES": "#3B82F6"}
-            
+
             for sys_name, res_data in results.items():
                 fig_dispatch.add_trace(go.Scatter(
                     x=list(range(1, 25)),
@@ -278,7 +290,7 @@ if st.button("🚀 Run 8,760-Hour Optimization Engine", type="primary", use_cont
                 legend=dict(orientation="h", y=1.12)
             )
             st.plotly_chart(fig_dispatch, use_container_width=True)
-            
+
             # 4. PDF Export Download
             st.subheader("📄 Executive Proposal PDF Generation")
             pdf_bytes = generate_pdf_report(
@@ -292,10 +304,10 @@ if st.button("🚀 Run 8,760-Hour Optimization Engine", type="primary", use_cont
                 mime="application/pdf",
                 use_container_width=True
             )
-            
+
             # Memory Cleanup
             del l_8760, t_8760
             gc.collect()
-            
+
         except Exception as e:
             st.error(f"Execution Error: {str(e)}")
