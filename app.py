@@ -99,7 +99,7 @@ with st.sidebar.expander("💰 4. Financial Unit Rates & Tariffs", expanded=Fals
 # ----------------------------------------------------
 if show_editor:
     st.subheader("📅 Interactive 24-Hour Diurnal Load & ToU Tariff Data Editor")
-    st.info("💡 **Dynamic Calculation Active:** Edit **Cooling Load (%)** or **Tariff**. Press **Enter**, **Tab**, or click anywhere outside the cell to instantly update **Cooling Load (TR)**, **ToU Category**, and the visual dispatch chart.")
+    st.info("💡 **Bi-Directional Entry Active:** You can edit **Cooling Load (%)**, **Cooling Load (TR)**, or **Tariff** directly. Press **Enter**, **Tab**, or click outside the cell to trigger instant recalculation.")
     
     # Initialize base dataframe
     df_init = pd.DataFrame({
@@ -110,13 +110,13 @@ if show_editor:
         "ToU Category": [get_tou_category(t * mult) for t in DEFAULT_24H_TARIFF]
     })
     
-    # Interactive Data Editor
+    # Interactive Data Editor - Both Load % and Load TR are fully editable
     edited_df = st.data_editor(
         df_init,
         column_config={
             "Hour": st.column_config.TextColumn("Hour of Day", disabled=True),
             "Cooling Load (%)": st.column_config.NumberColumn("Cooling Load (%)", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%"),
-            "Cooling Load (TR)": st.column_config.NumberColumn("Cooling Load (TR) [Auto]", disabled=True, format="%.2f TR"),
+            "Cooling Load (TR)": st.column_config.NumberColumn("Cooling Load (TR)", min_value=0.0, max_value=peak_load_tr*1.5, step=10.0, format="%.2f TR"),
             f"Tariff ({sym}/kWh)": st.column_config.NumberColumn(f"Electricity Tariff ({sym}/kWh)", min_value=0.0, step=0.10, format="%.2f"),
             "ToU Category": st.column_config.TextColumn("ToU Window [Auto]", disabled=True)
         },
@@ -125,8 +125,20 @@ if show_editor:
         key="data_editor_24h"
     )
     
-    # REACTIVE VECTOR RECALCULATION
-    edited_df["Cooling Load (TR)"] = (edited_df["Cooling Load (%)"] / 100.0) * peak_load_tr
+    # BI-DIRECTIONAL DYNAMIC SYNCHRONIZATION
+    for i in range(24):
+        init_pct = df_init.at[i, "Cooling Load (%)"]
+        init_tr = df_init.at[i, "Cooling Load (TR)"]
+        curr_pct = edited_df.at[i, "Cooling Load (%)"]
+        curr_tr = edited_df.at[i, "Cooling Load (TR)"]
+        
+        # Check if TR was edited directly
+        if abs(curr_tr - init_tr) > 1e-3 and abs(curr_pct - init_pct) < 1e-3:
+            edited_df.at[i, "Cooling Load (%)"] = min(100.0, (curr_tr / peak_load_tr) * 100.0) if peak_load_tr > 0 else 0.0
+        # Check if % was edited directly
+        elif abs(curr_pct - init_pct) > 1e-3:
+            edited_df.at[i, "Cooling Load (TR)"] = (curr_pct / 100.0) * peak_load_tr
+            
     edited_df["ToU Category"] = edited_df[f"Tariff ({sym}/kWh)"].apply(get_tou_category)
     
     load_24_profile = edited_df["Cooling Load (TR)"].tolist()
