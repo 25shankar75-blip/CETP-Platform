@@ -19,15 +19,14 @@ def generate_pdf_report(proj_name: str, location: str, industry: str, proj_type:
     story.append(Spacer(1, 6))
     
     table_data = [list(comp_df.columns)] + comp_df.values.tolist()
-    t = Table(table_data, colWidths=[90, 60, 60, 60, 60, 60, 65, 75, 75, 75, 75, 60])
+    t = Table(table_data, colWidths=[100, 75, 75, 75, 75, 75, 80, 85, 85])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e3d59')), ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 7.5), ('BOTTOMPADDING', (0,0), (-1,0), 5),
+        ('FONTSIZE', (0,0), (-1,0), 8), ('BOTTOMPADDING', (0,0), (-1,0), 6),
         ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f8f9fa')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dee2e6')),
-        ('FONTSIZE', (0,1), (-1,-1), 7)
+        ('FONTSIZE', (0,1), (-1,-1), 8)
     ]))
-    
     story.append(t)
     doc.build(story)
     buffer.seek(0)
@@ -36,13 +35,11 @@ def generate_pdf_report(proj_name: str, location: str, industry: str, proj_type:
 def generate_word_report(proj_name: str, location: str, industry: str, proj_type: str, currency: str, comp_df: pd.DataFrame) -> bytes:
     try:
         import docx
-        from docx.shared import Pt, Inches
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-    except ImportError:
-        return None
+        from docx.shared import Pt
+    except ImportError: return None
         
     doc = docx.Document()
-    # Ensure landscape
     section = doc.sections[0]
     section.page_width, section.page_height = section.page_height, section.page_width
     
@@ -52,15 +49,11 @@ def generate_word_report(proj_name: str, location: str, industry: str, proj_type
     
     table = doc.add_table(rows=1, cols=len(comp_df.columns))
     table.style = 'Table Grid'
-    
     hdr_cells = table.rows[0].cells
-    for i, col in enumerate(comp_df.columns):
-        hdr_cells[i].text = col
-        
+    for i, col in enumerate(comp_df.columns): hdr_cells[i].text = col
     for index, row in comp_df.iterrows():
         row_cells = table.add_row().cells
-        for i, value in enumerate(row):
-            row_cells[i].text = str(value)
+        for i, value in enumerate(row): row_cells[i].text = str(value)
             
     buffer = io.BytesIO()
     doc.save(buffer)

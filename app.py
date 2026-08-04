@@ -17,16 +17,11 @@ st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color:
 st.markdown('<p class="main-header">❄️ Cooling Energy Transition Platform (CETP)</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal Energy Storage Digital Twin</p>', unsafe_allow_html=True)
 
-# DEFAULT PROFILES
 DEFAULT_LOAD = [60, 60, 60, 60, 60, 60, 80, 90, 100, 100, 100, 100, 100, 100, 90, 90, 80, 80, 70, 70, 60, 60, 60, 60]
 DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 
-# --- SESSION STATE & SAVE/LOAD LOGIC ---
-ui_keys = {
-    "proj_name": "Pharma Greenfield Baseline", "location": "MP, India", "industry": "Pharmaceuticals",
-    "proj_type": "Greenfield Project", "peak_load_tr": 2794.18, "tank_shape": "Cylindrical (API 650)",
-    "currency": "INR (₹)", "chiller_type": "Water-Cooled (With Cooling Towers)", "demand_rate": 475.0
-}
+# --- JSON PROJECT MANAGEMENT ---
+ui_keys = {"proj_name": "Pharma Greenfield Baseline", "location": "MP, India", "industry": "Pharmaceuticals", "proj_type": "Greenfield Project", "peak_load_tr": 2794.18, "tank_shape": "Cylindrical (API 650)", "currency": "INR (₹)", "chiller_type": "Water-Cooled (With Cooling Towers)", "demand_rate": 475.0}
 for k, v in ui_keys.items():
     if k not in st.session_state: st.session_state[k] = v
 
@@ -39,7 +34,6 @@ with st.sidebar.expander("💾 Project Management (Save / Open)", expanded=False
                 if k in data: st.session_state[k] = data[k]
             if "df_24" in data: st.session_state["df_24"] = pd.DataFrame(data["df_24"])
             st.success("Project Loaded Successfully!")
-            st.rerun()
         except: st.error("Invalid project file.")
 
     save_dict = {k: st.session_state[k] for k in ui_keys.keys()}
@@ -62,18 +56,16 @@ with st.sidebar.expander("💰 Financial Rates"): demand_rate = st.number_input(
 
 sym = CURRENCY_MULTIPLIERS[currency]["symbol"]
 mult = CURRENCY_MULTIPLIERS[currency]["rate"]
-rates = {'water_cooled_chiller': 17000*mult, 'air_cooled_chiller': 19000*mult, 'brine_chiller': 23000*mult, 'pcm_tes_cylindrical': 7533*mult, 'pcm_tes_rectangular': 8475*mult, 'strat_tes': 18000*mult, 'cooling_tower': 2200*mult, 'chw_pump': 700*mult, 'cdw_pump': 550*mult, 'brine_pump': 900*mult, 'phe': 1100*mult, 'dg_set': 11000*mult, 'transformer': 1700*mult}
-tc = ThermoConfig(chiller_type=chiller_type)
-fc = FinancialConfig(demand_rate=demand_rate)
+rates = {'water_cooled_chiller': 17000*mult, 'air_cooled_chiller': 19000*mult, 'brine_chiller': 23000*mult, 'pcm_tes_cylindrical': 7533*mult, 'pcm_tes_rectangular': 8475*mult, 'strat_tes': 18000*mult, 'cooling_tower': 2200*mult, 'chw_pump': 700*mult, 'cdw_pump': 550*mult, 'brine_pump': 900*mult, 'phe_and_integration': 1100*mult, 'dg_set': 11000*mult, 'transformer': 1700*mult}
 
-# --- 7 EXACT TABS REQUIRED ---
+# --- 7 EXACT TABS ---
 t1, t2, t3, t4, t5, t6, t7 = st.tabs(["Load Profile", "Conv. Plant", "PCM TES Opt.", "Strat. TES Opt.", "Exec. Summary", "CAPEX Breakup", "Report Dashboard"])
 
 with t1:
     st.subheader("Interactive 24-Hour Diurnal Load & ToU Tariff Data Editor")
     if "df_24" not in st.session_state or st.session_state.get("pk") != peak_load_tr:
         st.session_state["df_24"] = pd.DataFrame({
-            "Hour": [f"Hour {i:02d}" for i in range(24)], "Load (%)": [float(p) for p in DEFAULT_LOAD],
+            "Hour": [f"{i:02d}:00" for i in range(24)], "Load (%)": [float(p) for p in DEFAULT_LOAD],
             "Load (TR)": [(p/100)*peak_load_tr for p in DEFAULT_LOAD], f"Tariff ({sym})": [t*mult for t in DEFAULT_TARIFF]
         })
         st.session_state["pk"] = peak_load_tr
@@ -90,11 +82,10 @@ with t1:
     tar_arr = df_edit[f"Tariff ({sym})"].tolist()
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🚀 Run 8,760-Hour Simulation", type="primary"):
+if st.sidebar.button("🚀 Run Digital Twin Optimization", type="primary"):
     with st.spinner("Executing Mathematical Optimization..."):
         prm = {"chw_supply": 7.0, "chw_return": 12.0, "brine_supply": -5.5, "brine_return": -1.7, "kw_tr_base": 0.58, "kw_tr_brine": 0.85, 'unit_rates': rates, 'chiller_type': chiller_type, 'tank_shape': tank_shape, 'head_chw': 40.0, 'head_cw': 30.0, 'pump_efficiency': 0.70, 'ct_fan_ikw_tr': 0.015, 'demand_rate': demand_rate}
         charge_hrs = {22, 23, 0, 1, 2, 3, 4, 5}
-        
         res = optimize_plant(expand_24_to_8760(load_arr), expand_24_to_8760(tar_arr), peak_load_tr, charge_hrs, prm, proj_type)
         
         def render_detailed_hourly_table(data_dict):
@@ -116,9 +107,9 @@ if st.sidebar.button("🚀 Run 8,760-Hour Simulation", type="primary"):
             render_detailed_hourly_table(res['c'])
 
         with t3:
-            st.subheader("PCM Thermal Energy Storage")
+            st.subheader("PCM Thermal Energy Storage (Optimum)")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Downsized Base Chillers", f"{res['p']['cap_base']:,.0f} TR", f"{res['p']['cap_base'] - res['c']['cap_base']:,.0f} TR (Savings)")
+            c1.metric("Downsized Base Chillers", f"{res['p']['cap_base']:,.0f} TR")
             c2.metric("Sub-Zero Brine Chillers", f"{res['p']['cap_dual']:,.0f} TR")
             c3.metric("PCM Storage Volume", f"{res['p']['cap_tes']:,.0f} TRh")
             c4.metric("Required Substation & DG", f"{res['p']['dg_kva']:,.0f} kVA", f"{res['p']['dg_kva'] - res['c']['dg_kva']:,.0f} kVA (Savings)")
@@ -130,9 +121,9 @@ if st.sidebar.button("🚀 Run 8,760-Hour Simulation", type="primary"):
             render_detailed_hourly_table(res['p'])
 
         with t4:
-            st.subheader("Stratified CHW Thermal Storage")
+            st.subheader("Stratified CHW Thermal Storage (Optimum)")
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Downsized Base Chillers", f"{res['s']['cap_base']:,.0f} TR", f"{res['s']['cap_base'] - res['c']['cap_base']:,.0f} TR (Savings)")
+            c1.metric("Downsized Base Chillers", f"{res['s']['cap_base']:,.0f} TR")
             c2.metric("Sub-Zero Brine Chillers", "0 TR")
             c3.metric("Stratified Storage Volume", f"{res['s']['cap_tes']:,.0f} TRh")
             c4.metric("Required Substation & DG", f"{res['s']['dg_kva']:,.0f} kVA", f"{res['s']['dg_kva'] - res['c']['dg_kva']:,.0f} kVA (Savings)")
@@ -151,7 +142,7 @@ if st.sidebar.button("🚀 Run 8,760-Hour Simulation", type="primary"):
         })
 
         with t5:
-            st.subheader("📊 Executive System Comparison")
+            st.subheader("📊 Executive Summary")
             st.table(df_comp)
 
         with t6:
@@ -165,9 +156,8 @@ if st.sidebar.button("🚀 Run 8,760-Hour Simulation", type="primary"):
             st.table(df_bk)
 
         with t7:
-            st.subheader("📑 Summarized Report Dashboard & Export")
+            st.subheader("📑 Report Dashboard & Export")
             st.info("Download client-ready executive proposals. All multi-currency rates, sizing logic, and CAPEX displacement rules have been integrated.")
-            
             c1, c2 = st.columns(2)
             with c1:
                 pdf = generate_pdf_report(proj_name, location, industry, proj_type, currency, df_comp)
@@ -176,5 +166,4 @@ if st.sidebar.button("🚀 Run 8,760-Hour Simulation", type="primary"):
                 doc = generate_word_report(proj_name, location, industry, proj_type, currency, df_comp)
                 if doc: st.download_button("📝 Export Word Document (.docx)", data=doc, file_name=f"CETP_Report_{proj_name}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
                 else: st.error("⚠️ `python-docx` is not installed. Please add it to requirements.txt.")
-        
         gc.collect()

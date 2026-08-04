@@ -40,7 +40,7 @@ class FinancialConfig(BaseModel):
     unit_rates: Dict[str, float] = Field(default_factory=lambda: {
         'water_cooled_chiller': 17000.0, 'air_cooled_chiller': 19000.0, 'brine_chiller': 23000.0,
         'cooling_tower': 2200.0, 'chw_pump': 700.0, 'cdw_pump': 550.0, 'brine_pump': 900.0,
-        'phe': 1100.0, 'pcm_tes_cylindrical': 7533.0, 'pcm_tes_rectangular': 8475.0,
+        'phe_and_integration': 1100.0, 'pcm_tes_cylindrical': 7533.0, 'pcm_tes_rectangular': 8475.0,
         'strat_tes': 18000.0, 'dg_set': 11000.0, 'transformer': 1700.0
     })
     kw_tr_base: float = Field(default=0.58)

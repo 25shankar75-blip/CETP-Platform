@@ -23,6 +23,7 @@ def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: di
     rate_pcm = rates.get('pcm_tes_cylindrical', 7533) if "Cylindrical" in prm.get('tank_shape', '') else rates.get('pcm_tes_rectangular', 8475)
     rate_strat = rates.get('strat_tes', 18000)
     rate_elec = rates.get('dg_set', 11000) + rates.get('transformer', 1700)
+    rate_integration = rates.get('phe_and_integration', 1100) # PHE, Actuated Valves, BMS
     
     c_chill = 0.0 if is_brownfield else rate_chiller
     c_ct = 0.0 if is_brownfield else rate_ct
@@ -34,20 +35,20 @@ def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: di
         bkup['Towers & Pumps'] = base_inst * (c_ct + rate_pumps)
         bkup['Storage Tank & Media'] = 0.0
         bkup['Electrical Infra & DG'] = 0.0 if is_brownfield else (dg_kva * rate_elec)
-        bkup['Piping & Indirects'] = (bkup['Base Chillers'] + bkup['Towers & Pumps']) * 0.15
+        bkup['Piping, PHE & Indirects'] = (bkup['Base Chillers'] + bkup['Towers & Pumps']) * 0.15
     elif mode == "PCM TES":
         bkup['Base Chillers'] = b_cap * c_chill
         bkup['Dual/Brine Chillers'] = d_cap * rate_brine
         bkup['Towers & Pumps'] = (b_cap + d_cap) * (c_ct + rate_pumps)
         bkup['Storage Tank & Media'] = t_cap * rate_pcm
         bkup['Electrical Infra & DG'] = 0.0 if is_brownfield else (dg_kva * rate_elec)
-        bkup['Piping & Indirects'] = (bkup['Base Chillers'] + bkup['Dual/Brine Chillers'] + bkup['Towers & Pumps'] + bkup['Storage Tank & Media']) * 0.15
+        bkup['Piping, PHE & Indirects'] = ((bkup['Base Chillers'] + bkup['Dual/Brine Chillers'] + bkup['Towers & Pumps']) * 0.15) + (t_cap * rate_integration)
     else: 
         bkup['Base Chillers'] = b_cap * c_chill
         bkup['Dual/Brine Chillers'] = 0.0
         bkup['Towers & Pumps'] = b_cap * (c_ct + rate_pumps)
         bkup['Storage Tank & Media'] = t_cap * rate_strat
         bkup['Electrical Infra & DG'] = 0.0 if is_brownfield else (dg_kva * rate_elec)
-        bkup['Piping & Indirects'] = (bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Storage Tank & Media']) * 0.15
+        bkup['Piping, PHE & Indirects'] = ((bkup['Base Chillers'] + bkup['Towers & Pumps']) * 0.15) + (t_cap * rate_integration)
         
     return bkup, sum(bkup.values())

@@ -5,3 +5,4 @@ pydantic
 plotly
 reportlab
 requests
+python-docx

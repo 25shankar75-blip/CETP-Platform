@@ -10,25 +10,20 @@ def get_plv_kw_tr(load_fraction: float, full_load_kw_tr: float) -> float:
     return full_load_kw_tr * multiplier
 
 def get_night_condenser_bonus(hour_of_day: int) -> float:
-    """Dynamic Condenser Relief: Ambient WBT drop at night improves chiller efficiency."""
-    if hour_of_day <= 6 or hour_of_day >= 22:
-        return 0.92
+    if hour_of_day <= 6 or hour_of_day >= 22: return 0.92
     return 1.0
 
 def calc_pump_ikw_tr(delta_t_c: float, head_m: float, efficiency: float, is_brine: bool = False) -> float:
-    """Standard specific pump power derived from flow rates."""
     if delta_t_c <= 0: return 0.0
     cp = 3.65 if is_brine else 4.18
     m_dot = 3.517 / (cp * delta_t_c)
     return (9.81 * m_dot * head_m) / (efficiency * 1000.0)
 
 def calc_vfd_pump_power(base_ikw_tr: float, load_tr: float, rated_tr: float, min_speed_ratio: float = 0.35) -> float:
-    """VFD Affinity Laws: Power drops with the cube of the flow ratio."""
     if rated_tr <= 0 or load_tr <= 0: return 0.0
     flow_ratio = max(min_speed_ratio, min(1.0, load_tr / rated_tr))
     design_power = rated_tr * base_ikw_tr
     return design_power * (flow_ratio ** 3) 
 
 def expand_24_to_8760(day1_profile: list) -> np.ndarray:
-    """Expands base diurnal loads across the 8760 hour annual state machine."""
     return np.tile(np.array(day1_profile, dtype=np.float32), 365)
