@@ -22,21 +22,18 @@ class ProjectConfig(BaseModel):
     project_name: str = "Ujjain Pharma Greenfield Baseline"
     location: str = "Ujjain, MP, India"
     sector: str = "Pharmaceutical"
-    scope: str = "Greenfield"  # "Greenfield" or "Brownfield (Retrofit)"
+    scope: str = "Greenfield" 
     currency: str = "INR (₹)"
     peak_load_tr: float = 2794.18
-    tank_shape: str = "Cylindrical"  # "Cylindrical" or "Rectangular"
+    tank_shape: str = "Cylindrical"
 
 class ThermoConfig(BaseModel):
-    chiller_type: str = "Water-Cooled Centrifugal"  # or "Air-Cooled Screw"
-    base_chiller_cop: float = 6.0  # ~0.586 kW/TR for Water-Cooled
+    chiller_type: str = "Water-Cooled Centrifugal"
+    base_chiller_cop: float = 6.0
     design_wbt: float = 28.0
     pcm_charge_temp: float = -5.5
-    pcm_discharge_temp: float = 4.0
-    stratified_charge_temp: float = 4.0
-    stratified_discharge_temp: float = 10.0
-    pcm_derate_factor: float = 0.85  # Sub-zero brine COP penalty
-    night_relief_multiplier: float = 0.92  # Wet-bulb relief bonus multiplier (22:00 to 06:00)
+    pcm_derate_factor: float = 0.85 
+    night_relief_multiplier: float = 0.92 
 
 class HydraulicConfig(BaseModel):
     chw_delta_t: float = 6.0
@@ -46,13 +43,8 @@ class HydraulicConfig(BaseModel):
     cdw_pump_head_m: float = 25.0
     brine_pump_head_m: float = 45.0
     pump_efficiency: float = 0.75
-    phe_pressure_drop_m: float = 10.0
-    phe_pinch_point_k: float = 1.5
 
 class FinancialConfig(BaseModel):
-    electricity_tariff_off_peak: float = 5.62
-    electricity_tariff_normal: float = 6.11
-    electricity_tariff_peak: float = 7.03
     demand_charge_per_kva_month: float = 475.0
     unit_rates: Dict[str, float] = Field(default_factory=lambda: {
         'water_cooled_chiller': 17000.0,
