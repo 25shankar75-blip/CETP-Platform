@@ -95,53 +95,39 @@ with st.sidebar.expander("💰 4. Financial Unit Rates & Tariffs", expanded=Fals
     }
 
 # ----------------------------------------------------
-# MAIN SCREEN: DYNAMIC 24-HOUR PROFILE DATA EDITOR
+# MAIN SCREEN: 24-HOUR PROFILE DATA EDITOR
 # ----------------------------------------------------
 if show_editor:
     st.subheader("📅 Interactive 24-Hour Diurnal Load & ToU Tariff Data Editor")
-    st.info("💡 **Dynamic Calculation Active:** Edit **Cooling Load (%)** or **Tariff**. Press **Enter**, **Tab**, or click anywhere outside the cell to instantly update **Cooling Load (TR)**, **ToU Category**, and the visual dispatch chart.")
+    st.info("Edit cooling load percentages and electricity tariffs below. The 8,760-hour simulation will lock Day 1 inputs and dynamically extrapolate across the full annual dispatch state machine.")
     
-    # Initialize base dataframe
     df_init = pd.DataFrame({
         "Hour": [f"Hour {i+1:02d} ({i:02d}:00)" for i in range(24)],
         "Cooling Load (%)": DEFAULT_24H_LOAD_PCT,
         "Cooling Load (TR)": [(p / 100.0) * peak_load_tr for p in DEFAULT_24H_LOAD_PCT],
         f"Tariff ({sym}/kWh)": [t * mult for t in DEFAULT_24H_TARIFF],
-        "ToU Category": [get_tou_category(t * mult) for t in DEFAULT_24H_TARIFF]
+        "ToU Category": [get_tou_category(t) for t in DEFAULT_24H_TARIFF]
     })
     
-    # Interactive Data Editor
     edited_df = st.data_editor(
         df_init,
         column_config={
             "Hour": st.column_config.TextColumn("Hour of Day", disabled=True),
-            "Cooling Load (%)": st.column_config.NumberColumn("Cooling Load (%)", min_value=0.0, max_value=100.0, step=1.0, format="%.1f%%"),
-            "Cooling Load (TR)": st.column_config.NumberColumn("Cooling Load (TR) [Auto]", disabled=True, format="%.2f TR"),
+            "Cooling Load (%)": st.column_config.NumberColumn("Cooling Load (%)", min_value=0.0, max_value=100.0, step=5.0, format="%.1f%%"),
+            "Cooling Load (TR)": st.column_config.NumberColumn("Cooling Load (TR)", format="%.1f TR"),
             f"Tariff ({sym}/kWh)": st.column_config.NumberColumn(f"Electricity Tariff ({sym}/kWh)", min_value=0.0, step=0.10, format="%.2f"),
-            "ToU Category": st.column_config.TextColumn("ToU Window [Auto]", disabled=True)
+            "ToU Category": st.column_config.TextColumn("ToU Window", disabled=True)
         },
         use_container_width=True,
         num_rows="fixed",
         key="data_editor_24h"
     )
     
-    # REACTIVE VECTOR RECALCULATION
-    edited_df["Cooling Load (TR)"] = (edited_df["Cooling Load (%)"] / 100.0) * peak_load_tr
-    edited_df["ToU Category"] = edited_df[f"Tariff ({sym}/kWh)"].apply(get_tou_category)
+    # Recalculate TR based on edited %
+    load_24_profile = [(r / 100.0) * peak_load_tr for r in edited_df["Cooling Load (%)"]]
+    tariff_24_profile = list(edited_df[f"Tariff ({sym}/kWh)"])
     
-    load_24_profile = edited_df["Cooling Load (TR)"].tolist()
-    tariff_24_profile = edited_df[f"Tariff ({sym}/kWh)"].tolist()
-    
-    # Summary Feedback Metrics
-    col_m1, col_m2, col_m3 = st.columns(3)
-    with col_m1:
-        st.metric("Total 24-Hr Energy Demand", f"{sum(load_24_profile):,.2f} TRh")
-    with col_m2:
-        st.metric("Peak Diurnal Load", f"{max(load_24_profile):,.2f} TR")
-    with col_m3:
-        st.metric("Weighted Avg Tariff", f"{sym} {np.mean(tariff_24_profile):.2f} / kWh")
-    
-    # Live Diurnal Chart
+    # Live Diurnal Visualizer
     fig_diurnal = make_subplots(specs=[[{"secondary_y": True}]])
     fig_diurnal.add_trace(
         go.Bar(x=list(range(1, 25)), y=tariff_24_profile, name=f"ToU Tariff ({sym}/kWh)", marker_color="#93C5FD", opacity=0.6),
@@ -151,12 +137,7 @@ if show_editor:
         go.Scatter(x=list(range(1, 25)), y=load_24_profile, name="Cooling Load (TR)", mode="lines+markers", line=dict(color="#1E3A8A", width=3)),
         secondary_y=True
     )
-    fig_diurnal.update_layout(
-        title_text="Live 24-Hour Cooling Load (TR) vs. ToU Electricity Tariff Curve", 
-        height=320, 
-        margin=dict(l=20, r=20, t=40, b=20), 
-        legend=dict(orientation="h", y=1.15)
-    )
+    fig_diurnal.update_layout(title_text="24-Hour Diurnal Cooling Demand vs. Tariff Profile", height=320, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h", y=1.15))
     fig_diurnal.update_xaxes(title_text="Hour of Day (1 - 24)")
     fig_diurnal.update_yaxes(title_text=f"Tariff ({sym}/kWh)", secondary_y=False)
     fig_diurnal.update_yaxes(title_text="Cooling Load (TR)", secondary_y=True)
