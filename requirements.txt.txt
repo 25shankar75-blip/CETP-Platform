@@ -1,0 +1,8 @@
+streamlit
+pandas
+numpy
+pydantic
+plotly
+reportlab
+requests
+python-docx
