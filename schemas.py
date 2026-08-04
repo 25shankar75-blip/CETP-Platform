@@ -1,51 +1,40 @@
 # schemas.py
 from pydantic import BaseModel, Field
-from typing import Dict, Any
+from typing import Literal, Dict
 
-CURRENCY_MULTIPLIERS: Dict[str, float] = {
-    "INR (₹)": 1.0,
-    "USD ($)": 0.012,
-    "EUR (€)": 0.011,
-    "AED (د.إ)": 0.044,
-    "MYR (RM)": 0.056
-}
-
-CURRENCY_SYMBOLS: Dict[str, str] = {
-    "INR (₹)": "₹",
-    "USD ($)": "$",
-    "EUR (€)": "€",
-    "AED (د.إ)": "AED",
-    "MYR (RM)": "RM"
+CURRENCY_MULTIPLIERS = {
+    "INR (₹)": {"rate": 1.0, "symbol": "₹", "scale_name": "Crores / Lakhs"},
+    "USD ($)": {"rate": 1.0 / 83.5, "symbol": "$", "scale_name": "Millions / Thousands"},
+    "EUR (€)": {"rate": 1.0 / 90.0, "symbol": "€", "scale_name": "Millions / Thousands"},
+    "AED (د.إ)": {"rate": 1.0 / 22.7, "symbol": "د.إ", "scale_name": "Millions / Thousands"},
+    "MYR (RM)": {"rate": 1.0 / 18.0, "symbol": "RM", "scale_name": "Millions / Thousands"}
 }
 
 class ProjectConfig(BaseModel):
-    project_name: str = "Ujjain Pharma Greenfield Baseline"
-    location: str = "Ujjain, MP, India"
-    sector: str = "Pharmaceutical"
-    scope: str = "Greenfield" 
-    currency: str = "INR (₹)"
-    peak_load_tr: float = 2794.18
-    tank_shape: str = "Cylindrical"
+    proj_name: str = Field(default="Pharma Greenfield Plant")
+    location: str = Field(default="Ujjain, MP, India")
+    industry: Literal["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process"] = Field(default="Pharmaceuticals")
+    proj_type: Literal["Greenfield Project", "Brownfield / Retrofit"] = Field(default="Greenfield Project")
+    peak_load_tr: float = Field(default=2794.18, gt=0, description="Peak cooling load in TR")
+    tank_shape: Literal["Cylindrical (API 650)", "Rectangular Concrete/Steel"] = Field(default="Cylindrical (API 650)")
+    currency: Literal["INR (₹)", "USD ($)", "EUR (€)", "AED (د.إ)", "MYR (RM)"] = Field(default="INR (₹)")
 
 class ThermoConfig(BaseModel):
-    chiller_type: str = "Water-Cooled Centrifugal"
-    base_chiller_cop: float = 6.0
-    design_wbt: float = 28.0
-    pcm_charge_temp: float = -5.5
-    pcm_derate_factor: float = 0.85 
-    night_relief_multiplier: float = 0.92 
+    chw_supply: float = Field(default=7.0)
+    chw_return: float = Field(default=12.0)
+    brine_supply: float = Field(default=-5.5)
+    brine_return: float = Field(default=-1.7)
+    chiller_type: Literal["Water-Cooled (With Cooling Towers)", "Air-Cooled"] = Field(default="Water-Cooled (With Cooling Towers)")
 
 class HydraulicConfig(BaseModel):
-    chw_delta_t: float = 6.0
-    pcm_fom: float = 0.95
-    strat_fom: float = 0.90
-    chw_pump_head_m: float = 35.0
-    cdw_pump_head_m: float = 25.0
-    brine_pump_head_m: float = 45.0
-    pump_efficiency: float = 0.75
+    head_chw: float = Field(default=40.0, description="Primary CHW pump head in meters")
+    head_cw: float = Field(default=30.0, description="Condenser water pump head in meters")
+    head_phe_penalty: float = Field(default=10.0, description="PHE pressure drop penalty in meters")
+    pump_efficiency: float = Field(default=0.70, gt=0, le=1.0)
+    ct_fan_ikw_tr: float = Field(default=0.015)
 
 class FinancialConfig(BaseModel):
-    demand_charge_per_kva_month: float = 475.0
+    demand_rate: float = Field(default=475.0, description="Monthly Demand Charge per kVA")
     unit_rates: Dict[str, float] = Field(default_factory=lambda: {
         'water_cooled_chiller': 17000.0,
         'air_cooled_chiller': 19000.0,
@@ -61,3 +50,5 @@ class FinancialConfig(BaseModel):
         'dg_set': 11000.0,
         'transformer': 1700.0
     })
+    kw_tr_base: float = Field(default=0.58)
+    kw_tr_brine: float = Field(default=0.85)

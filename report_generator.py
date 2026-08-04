@@ -1,32 +1,39 @@
 # report_generator.py
 import io
-from reportlab.lib.pagesizes import A4
+import pandas as pd
+from reportlab.lib.pagesizes import landscape, letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-from financial_engine import format_currency
 
-def generate_pdf_report(project_data, results):
+def generate_pdf_report(proj_name: str, location: str, industry: str, proj_type: str, currency: str, comp_df: pd.DataFrame) -> bytes:
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30)
-    elements = []
-    curr = project_data['currency']
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=36, leftMargin=36, topMargin=36, bottomMargin=36)
+    story = []
     
-    elements.append(Paragraph(f"<b>CETP Executive Digital Twin Output: {project_data['project_name']}</b>", getSampleStyleSheet()['Title']))
-    elements.append(Spacer(1, 10))
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle('DocTitle', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor('#1e3d59'), spaceAfter=4)
+    subtitle_style = ParagraphStyle('DocSubTitle', parent=styles['Normal'], fontSize=10, leading=13, textColor=colors.HexColor('#438a5e'), spaceAfter=12)
     
-    matrix = [["Metric", "Conventional", "PCM TES", "Stratified TES"]]
-    matrix.append(["Base Chiller (TR)", f"{results['Conventional N+1']['Base_TR']:,.0f}", f"{results['PCM TES']['Base_TR']:,.0f}", f"{results['Stratified TES']['Base_TR']:,.0f}"])
-    matrix.append(["TES Storage (TRh)", "0", f"{results['PCM TES']['TES_TRh']:,.0f}", f"{results['Stratified TES']['TES_TRh']:,.0f}"])
-    matrix.append(["Substation (kVA)", f"{results['Conventional N+1']['Sub_kVA']:,.0f}", f"{results['PCM TES']['Sub_kVA']:,.0f}", f"{results['Stratified TES']['Sub_kVA']:,.0f}"])
-    matrix.append(["Total CAPEX", format_currency(results['Conventional N+1']['CAPEX']['Total_CAPEX'], curr), format_currency(results['PCM TES']['CAPEX']['Total_CAPEX'], curr), format_currency(results['Stratified TES']['CAPEX']['Total_CAPEX'], curr)])
-    matrix.append(["Total OPEX", format_currency(results['Conventional N+1']['Tot_OPEX'], curr), format_currency(results['PCM TES']['Tot_OPEX'], curr), format_currency(results['Stratified TES']['Tot_OPEX'], curr)])
-    matrix.append(["Simple Payback", "Baseline", f"{results['PCM TES'].get('Payback',0):.2f} Yrs", f"{results['Stratified TES'].get('Payback',0):.2f} Yrs"])
-
-    t = Table(matrix, colWidths=[130, 110, 110, 110])
-    t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1E3A8A')),('TEXTCOLOR', (0,0), (-1,0), colors.white),('GRID', (0,0), (-1,-1), 0.5, colors.grey)]))
-    elements.append(t)
+    story.append(Paragraph(f"Cooling Energy Transition Platform (CETP) - {proj_name}", title_style))
+    story.append(Paragraph(f"Location: {location} | Industry: {industry} | Scope: {proj_type} | Currency: {currency}", subtitle_style))
+    story.append(Spacer(1, 6))
     
-    doc.build(elements)
+    table_data = [list(comp_df.columns)] + comp_df.values.tolist()
+    t = Table(table_data, colWidths=[90, 60, 60, 60, 60, 60, 65, 75, 75, 75, 75, 60])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e3d59')),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0,0), (-1,0), 7.5),
+        ('BOTTOMPADDING', (0,0), (-1,0), 5),
+        ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f8f9fa')),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dee2e6')),
+        ('FONTSIZE', (0,1), (-1,-1), 7)
+    ]))
+    
+    story.append(t)
+    doc.build(story)
     buffer.seek(0)
-    return buffer
+    return buffer.getvalue()
