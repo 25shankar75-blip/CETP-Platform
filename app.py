@@ -42,7 +42,9 @@ ui_keys = {
     "chiller_module_tr": 700.0, "design_wbt": 28.0, "use_live_weather": True, "use_coolprop": True,
     "chw_supply": 7.0, "chw_return": 12.0, "brine_supply": -5.0, "brine_return": -1.7, "kw_tr_base": 0.58, "kw_tr_brine": 0.85, 
     "chw_pump_kw": 0.078, "cw_pump_kw": 0.030, "ct_fan_kw": 0.020, "brine_pump_kw": 0.020, 
-    "ext_kw_tr_base": 0.85, "ext_chw_pump_kw": 0.12, "ext_cw_pump_kw": 0.05, "ext_ct_fan_kw": 0.04, 
+    "ext_chw_flow": 450.0, "ext_chw_sup": 9.0, "ext_chw_ret": 14.0, "ext_chw_head": 35.0,
+    "ext_cw_flow": 550.0, "ext_cw_sup": 32.0, "ext_cw_ret": 37.0, "ext_cw_head": 25.0,
+    "ext_ct_fan_kw": 45.0, "ext_chiller_kw_tr": 0.85,
     "demand_rate": 475.0, "water_cost_kl": 25.0, 
     "grid_emission": 0.716, "evap_loss": 1.8, "rate_water_chiller": 19000.0, "rate_air_chiller": 21000.0, "rate_brine_chiller": 23000.0, 
     "rate_pcm_cyl": 7800.0, "rate_pcm_rect": 8500.0, "rate_strat_tes": 18000.0, "rate_ct": 3200.0, "rate_chw_pump": 900.0, 
@@ -56,7 +58,8 @@ for k, v in ui_keys.items():
 def reset_sim(): st.session_state.run_sim = False
 
 st.sidebar.header("🛠️ Input Master Suite")
-nav_selection = st.sidebar.radio("Navigation Menu", ["⚙️ 1. 24-Hr Load Profile", "📌 2. Project & TES Parameters", "🌡️ 3. Chiller & Aux Parameters", "💰 4. Financial CAPEX Rates", "⚡ 5. Water & Electrical Data"], on_change=reset_sim)
+# Reordered Nav: Project Details first, Load Profile second.
+nav_selection = st.sidebar.radio("Navigation Menu", ["📌 1. Project Details & Scope", "⚙️ 2. 24-Hr Load Profile", "🌡️ 3. Chiller & Retrofit Audit", "💰 4. Financial CAPEX Rates", "⚡ 5. Water & Electrical Data"], on_change=reset_sim)
 
 st.sidebar.markdown("---")
 if st.sidebar.button("🚀 Run Digital Twin Optimization", type="primary"): st.session_state.run_sim = True
@@ -91,37 +94,9 @@ calc_peak = float(st.session_state["df_24"]["Load (TR)"].max())
 calc_daily = float(st.session_state["df_24"]["Load (TR)"].sum())
 calc_avg = float(st.session_state["df_24"]["Load (TR)"].mean())
 
+# --- MAIN SCREEN LOGIC ---
 if not st.session_state.run_sim:
-    if nav_selection == "⚙️ 1. 24-Hr Load Profile":
-        st.subheader("⚙️ Hourly Load & Tariff Input (Bidirectional Editing)")
-        df_edit = st.data_editor(st.session_state["df_24"], use_container_width=True, num_rows="fixed", key="edit_24")
-        
-        state = st.session_state.get("edit_24", {}).get("edited_rows", {})
-        if state:
-            curr_peak = df_edit["Load (TR)"].max()
-            df_copy = st.session_state["df_24"].copy()
-            for r_str, changes in state.items():
-                r = int(r_str)
-                if "Load (TR)" in changes:
-                    new_tr = float(changes["Load (TR)"])
-                    df_copy.at[r, "Load (TR)"] = new_tr
-                    df_copy.at[r, "Load (%)"] = (new_tr / curr_peak * 100) if curr_peak > 0 else 0
-                elif "Load (%)" in changes:
-                    new_pct = float(changes["Load (%)"])
-                    df_copy.at[r, "Load (%)"] = new_pct
-                    df_copy.at[r, "Load (TR)"] = (new_pct / 100) * curr_peak
-            st.session_state["df_24"] = df_copy
-            st.rerun() 
-            
-        st.markdown("---")
-        st.markdown("##### Calculated Operational Displays (Locked from Table)")
-        c1, c2, c3, c4 = st.columns(4)
-        c1.number_input("Peak Load (TR)", value=calc_peak, disabled=True)
-        c2.number_input("Avg Load (TR)", value=calc_avg, disabled=True)
-        c3.number_input("Daily Load (TRh)", value=calc_daily, disabled=True)
-        c4.number_input("Annual Load (TRh)", value=calc_daily*365, disabled=True)
-
-    elif nav_selection == "📌 2. Project & TES Parameters":
+    if nav_selection == "📌 1. Project Details & Scope":
         st.subheader("📌 Project Details & API Integrations")
         col1, col2 = st.columns(2)
         with col1:
@@ -140,17 +115,77 @@ if not st.session_state.run_sim:
             st.session_state.tes_strategy = st.selectbox("TES Strategy", ["Partial Storage", "Full Storage", "Demand Limiting"], index=["Partial Storage", "Full Storage", "Demand Limiting"].index(st.session_state.tes_strategy))
             st.session_state.tank_shape = st.selectbox("Tank Geometry", ["Cylindrical", "Rectangular"], index=["Cylindrical", "Rectangular"].index(st.session_state.tank_shape))
 
-    elif nav_selection == "🌡️ 3. Chiller & Aux Parameters":
+    elif nav_selection == "⚙️ 2. 24-Hr Load Profile":
+        st.subheader("⚙️ Hourly Load & Tariff Input")
+        st.info("Edit Load (TR) and Tariff freely. The % column is reactive and auto-calculates without hanging the app.")
+        
+        # Bypassed the st.rerun loop. Uses pure column config formatting.
+        edited_df = st.data_editor(
+            st.session_state["df_24"],
+            use_container_width=True,
+            num_rows="fixed",
+            column_config={
+                "Hour": st.column_config.TextColumn("Hour", disabled=True),
+                "Load (TR)": st.column_config.NumberColumn("Load (TR)", format="%.1f TR"),
+                "Load (%)": st.column_config.NumberColumn("Load (%)", disabled=True, format="%.1f %%"),
+                f"Tariff ({sym})": st.column_config.NumberColumn(f"Tariff ({sym})", format="%.2f")
+            },
+            key="edit_24_table"
+        )
+        curr_peak = edited_df["Load (TR)"].max()
+        edited_df["Load (%)"] = (edited_df["Load (TR)"] / curr_peak * 100).fillna(0)
+        st.session_state["df_24"] = edited_df
+            
+        st.markdown("---")
+        st.markdown("##### Calculated Operational Displays (Locked from Table)")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.number_input("Peak Load (TR)", value=curr_peak, disabled=True)
+        c2.number_input("Avg Load (TR)", value=edited_df["Load (TR)"].mean(), disabled=True)
+        c3.number_input("Daily Load (TRh)", value=edited_df["Load (TR)"].sum(), disabled=True)
+        c4.number_input("Annual Load (TRh)", value=edited_df["Load (TR)"].sum()*365, disabled=True)
+
+    elif nav_selection == "🌡️ 3. Chiller & Retrofit Audit":
         if "Brownfield" in st.session_state.proj_type:
-            st.markdown("### 🔍 Existing Plant Audit (Current Running Inefficient State)")
-            st.info("These values will be used to simulate the true, unoptimized baseline OPEX.")
-            c3, c4 = st.columns(2)
-            st.session_state.ext_kw_tr_base = c3.number_input("Existing Chiller (kW/TR)", value=st.session_state.ext_kw_tr_base)
-            st.session_state.ext_chw_pump_kw = c3.number_input("Existing CHW Pump (kW/TR)", value=st.session_state.ext_chw_pump_kw)
-            st.session_state.ext_cw_pump_kw = c4.number_input("Existing CW Pump (kW/TR)", value=st.session_state.ext_cw_pump_kw)
-            st.session_state.ext_ct_fan_kw = c4.number_input("Existing CT Fan (kW/TR)", value=st.session_state.ext_ct_fan_kw)
+            st.markdown("### 🔍 Current Plant Audit (Low Delta-T Syndrome Diagnostics)")
+            st.error("Enter the real-time operational data of your existing inefficient plant. The platform will dynamically calculate your true running TR and auxiliary kW to establish a realistic baseline OPEX.")
+            
+            c_a1, c_a2, c_a3 = st.columns(3)
+            st.session_state.ext_chiller_kw_tr = c_a1.number_input("Existing Chiller Operation (kW/TR)", value=st.session_state.ext_chiller_kw_tr)
+            st.session_state.ext_ct_fan_kw = c_a2.number_input("Existing CT Fan Operation (kW)", value=st.session_state.ext_ct_fan_kw)
+            
+            st.markdown("##### 💧 Hydraulic Auditing")
+            c_h1, c_h2 = st.columns(2)
+            with c_h1:
+                st.markdown("**Primary CHW Circuit**")
+                st.session_state.ext_chw_flow = st.number_input("Running CHW Flow (m³/hr)", value=st.session_state.ext_chw_flow)
+                st.session_state.ext_chw_sup = st.number_input("Running CHW Supply Temp (°C)", value=st.session_state.ext_chw_sup)
+                st.session_state.ext_chw_ret = st.number_input("Running CHW Return Temp (°C)", value=st.session_state.ext_chw_ret)
+                st.session_state.ext_chw_head = st.number_input("Running CHW Pump Head (m)", value=st.session_state.ext_chw_head)
+            with c_h2:
+                st.markdown("**Condenser CW Circuit**")
+                st.session_state.ext_cw_flow = st.number_input("Running CW Flow (m³/hr)", value=st.session_state.ext_cw_flow)
+                st.session_state.ext_cw_sup = st.number_input("Running CW Entering Temp (°C)", value=st.session_state.ext_cw_sup)
+                st.session_state.ext_cw_ret = st.number_input("Running CW Leaving Temp (°C)", value=st.session_state.ext_cw_ret)
+                st.session_state.ext_cw_head = st.number_input("Running CW Pump Head (m)", value=st.session_state.ext_cw_head)
+                
+            # Dynamic Diagnostic Math
+            ext_chw_tr = (st.session_state.ext_chw_flow * 1000 / 3600) * 4.18 * (st.session_state.ext_chw_ret - st.session_state.ext_chw_sup) / 3.517
+            ext_chw_pump_kw = (st.session_state.ext_chw_flow / 3600) * st.session_state.ext_chw_head * 9.81 * 1000 / 0.70 / 1000
+            ext_cw_pump_kw = (st.session_state.ext_cw_flow / 3600) * st.session_state.ext_cw_head * 9.81 * 1000 / 0.70 / 1000
+            
+            st.session_state.ext_chw_pump_kw_tr = ext_chw_pump_kw / ext_chw_tr if ext_chw_tr > 0 else 0
+            st.session_state.ext_cw_pump_kw_tr = ext_cw_pump_kw / ext_chw_tr if ext_chw_tr > 0 else 0
+            st.session_state.ext_ct_fan_kw_tr = st.session_state.ext_ct_fan_kw / ext_chw_tr if ext_chw_tr > 0 else 0
+
+            st.markdown("##### 📊 Real-Time Diagnostic Results")
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Actual Cooling Delivered", f"{ext_chw_tr:.0f} TR")
+            r2.metric("Actual CHW Pump Index", f"{st.session_state.ext_chw_pump_kw_tr:.3f} kW/TR")
+            r3.metric("Actual CW Pump Index", f"{st.session_state.ext_cw_pump_kw_tr:.3f} kW/TR")
+            r4.metric("Actual CT Fan Index", f"{st.session_state.ext_ct_fan_kw_tr:.3f} kW/TR")
+            
             st.markdown("---")
-            st.markdown("### ✨ Optimized Design State (For TES Charging / New Equipment)")
+            st.markdown("### ✨ Optimized Design State (For TES Charging & Restoration)")
         else:
             st.markdown("### 🌡️ Base Chiller & Auxiliary Parameters")
             
@@ -158,23 +193,23 @@ if not st.session_state.run_sim:
         st.session_state.chiller_type = c1.selectbox("Chiller Type", ["Water-Cooled", "Air-Cooled"], index=0 if st.session_state.chiller_type == "Water-Cooled" else 1)
         st.session_state.chiller_module_tr = c2.number_input("Standard Chiller Module Size (TR)", value=st.session_state.chiller_module_tr)
         
-        st.session_state.chw_supply = c1.number_input("CHW Supply Temp (°C)", value=st.session_state.chw_supply)
-        st.session_state.brine_supply = c1.number_input("Brine Supply Temp (°C)", value=st.session_state.brine_supply)
+        st.session_state.chw_supply = c1.number_input("Design CHW Supply Temp (°C)", value=st.session_state.chw_supply)
+        st.session_state.brine_supply = c1.number_input("Design Brine Supply Temp (°C)", value=st.session_state.brine_supply)
         st.session_state.kw_tr_base = c1.number_input("Design Full Load Base Chiller (kW/TR)", value=st.session_state.kw_tr_base)
         st.session_state.design_wbt = c1.number_input("Design WBT (°C) for Efficiency Baseline", value=st.session_state.design_wbt)
         
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CHW Pump Power (kW/TR) [Design Base]</span>", unsafe_allow_html=True)
+        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>Design CHW Pump Power (kW/TR)</span>", unsafe_allow_html=True)
         st.session_state.chw_pump_kw = c1.number_input("chw_pump", value=st.session_state.chw_pump_kw, label_visibility="collapsed")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CT Fan Power (kW/TR) [Design Base]</span>", unsafe_allow_html=True)
+        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>Design CT Fan Power (kW/TR)</span>", unsafe_allow_html=True)
         st.session_state.ct_fan_kw = c1.number_input("ct_fan", value=st.session_state.ct_fan_kw, label_visibility="collapsed")
         
-        st.session_state.chw_return = c2.number_input("CHW Return Temp (°C)", value=st.session_state.chw_return)
-        st.session_state.brine_return = c2.number_input("Brine Return Temp (°C)", value=st.session_state.brine_return)
+        st.session_state.chw_return = c2.number_input("Design CHW Return Temp (°C)", value=st.session_state.chw_return)
+        st.session_state.brine_return = c2.number_input("Design Brine Return Temp (°C)", value=st.session_state.brine_return)
         st.session_state.kw_tr_brine = c2.number_input("Brine Chiller Full Load (kW/TR)", value=st.session_state.kw_tr_brine)
         
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Condenser Water Pump Power (kW/TR) [Design Base]</span>", unsafe_allow_html=True)
+        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Design Condenser Water Pump Power (kW/TR)</span>", unsafe_allow_html=True)
         st.session_state.cw_pump_kw = c2.number_input("cw_pump", value=st.session_state.cw_pump_kw, label_visibility="collapsed")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Brine Pump Power (kW/TR) [Design Base]</span>", unsafe_allow_html=True)
+        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Design Brine Pump Power (kW/TR)</span>", unsafe_allow_html=True)
         st.session_state.brine_pump_kw = c2.number_input("brine_pump", value=st.session_state.brine_pump_kw, label_visibility="collapsed")
 
     elif nav_selection == "💰 4. Financial CAPEX Rates":
@@ -230,10 +265,10 @@ else:
     audit_prm = prm.copy()
     if "Brownfield" in st.session_state.proj_type:
         audit_prm.update({
-            "kw_tr_base": st.session_state.ext_kw_tr_base,
-            "chw_pump_kw": st.session_state.ext_chw_pump_kw,
-            "cw_pump_kw": st.session_state.ext_cw_pump_kw,
-            "ct_fan_kw": st.session_state.ext_ct_fan_kw
+            "kw_tr_base": st.session_state.ext_chiller_kw_tr,
+            "chw_pump_kw": st.session_state.get('ext_chw_pump_kw_tr', 0.12),
+            "cw_pump_kw": st.session_state.get('ext_cw_pump_kw_tr', 0.05),
+            "ct_fan_kw": st.session_state.get('ext_ct_fan_kw_tr', 0.035)
         })
     
     load_arr = st.session_state["df_24"]["Load (TR)"].tolist()

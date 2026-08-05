@@ -8,9 +8,6 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     hr_of_day = np.arange(n_hrs) % 24
     wbt_8760 = fetch_8760_wbt(prm['location'], prm['design_wbt'], prm['use_live_weather'])
     
-    cp_water, rho_water = get_fluid_cp_density(prm['chw_supply'], False, prm['use_coolprop'])
-    cp_brine, rho_brine = get_fluid_cp_density(prm['brine_supply'], True, prm['use_coolprop'])
-    
     pwr_comp, pwr_brine, pwr_chw, pwr_cw, pwr_fan, pwr_total = np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs)
     charge_tr, discharge_tr = np.zeros(n_hrs), np.zeros(n_hrs)
     
@@ -30,7 +27,7 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
         
         if tes_cap == 0: 
             vfd = load / cap_base if cap_base > 0 else 1.0
-            pwr_comp[i] = load * kw_base_chiller * get_plv_kw_tr(vfd)/0.53 * bonus # Scaled against curve baseline
+            pwr_comp[i] = load * kw_base_chiller * get_plv_kw_tr(vfd)/0.53 * bonus 
             pwr_chw[i] = calc_vfd_power(kw_chw_pmp, load, cap_base)
             pwr_cw[i] = calc_vfd_power(kw_cw_pmp, load, cap_base) if "Water" in prm['chiller_type'] else 0
             pwr_fan[i] = kw_fan * load * (vfd**2) if "Water" in prm['chiller_type'] else 0
@@ -89,14 +86,14 @@ def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, audit_prm, proj_type)
     scale = peak_tr / 2794.176
     module_size = prm.get('chiller_module_tr', 700.0)
     
-    # 1. Baseline runs on AUDIT parameters (The inefficient running state)
+    # Baseline runs on AUDIT parameters (The inefficient running state)
     c_working = np.ceil(peak_tr / module_size) * module_size
     c_base = c_working + module_size 
     res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, audit_prm, proj_type)
     bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", audit_prm, res_c["dg_kva"], c_base, proj_type)
     maint_c = cap_c * audit_prm['maintenance_pct']
     
-    # 2. PCM TES runs on DESIGN parameters (Restored operational efficiency)
+    # PCM TES runs on DESIGN parameters (Restored operational efficiency)
     p_base = 2498.18 * scale
     p_dual = 295.99 * scale
     p_tes = 1512.10 * scale
@@ -104,7 +101,7 @@ def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, audit_prm, proj_type)
     bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES Opt.", prm, res_p["dg_kva"], c_base, proj_type)
     maint_p = cap_p * prm['maintenance_pct']
     
-    # 3. Stratified TES runs on DESIGN parameters (Restored operational efficiency)
+    # Stratified TES runs on DESIGN parameters
     s_base = 2250.0 * scale
     s_tes = 2067.87 * scale
     res_s = run_thermodynamic_simulation(L8760, T8760, s_base, 0, s_tes, charge_hrs, prm, proj_type)

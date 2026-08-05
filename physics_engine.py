@@ -45,8 +45,8 @@ def get_fluid_cp_density(temp_c: float, is_brine: bool, use_coolprop: bool):
     if use_coolprop and COOLPROP_AVAILABLE:
         try:
             fluid = 'INCOMP::MEG-30%' if is_brine else 'Water'
-            cp = CP.PropsSI('C', 'T', temp_k, 'P', 101325, fluid) / 1000.0 # kJ/kgK
-            rho = CP.PropsSI('D', 'T', temp_k, 'P', 101325, fluid) # kg/m3
+            cp = CP.PropsSI('C', 'T', temp_k, 'P', 101325, fluid) / 1000.0 
+            rho = CP.PropsSI('D', 'T', temp_k, 'P', 101325, fluid) 
             return cp, rho
         except: return (3.65, 1045.0) if is_brine else (4.18, 1000.0)
     else:
