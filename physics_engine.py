@@ -1,7 +1,7 @@
 # physics_engine.py
 import numpy as np
 
-# Custom Part-Load Curve (User Specified)
+# Exact Part-Load Curve from Rev19 Input
 PLV_LOADS = np.array([0.0, 0.25, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00])
 PLV_KW_TR = np.array([0.75, 0.70, 0.64, 0.58, 0.54, 0.51, 0.49, 0.50, 0.53])
 
@@ -10,6 +10,7 @@ def get_plv_kw_tr(load_fraction: float) -> float:
     return float(np.interp(safe_fraction, PLV_LOADS, PLV_KW_TR))
 
 def get_night_condenser_bonus(hour_of_day: int) -> float:
+    # 0.92 multiplier active from 22:00 to 06:00
     if hour_of_day <= 6 or hour_of_day >= 22: return 0.92
     return 1.0
 

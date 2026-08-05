@@ -48,7 +48,7 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
         pwr_total[i] = pwr_comp[i] + pwr_brine[i] + pwr_chw[i] + pwr_cw[i] + pwr_fan[i]
 
     dem_kw = float(np.max(pwr_total))
-    dg_kva = (dem_kw / 0.8) * 1.15 # 15% DG margin
+    dg_kva = (dem_kw / 0.8) * 1.15 # 15% DG margin applied to Transformer rating
     energy_kwh = np.sum(pwr_total)
     water_kl = (np.sum(load_prof) * prm['evap_loss']) / 1000.0 if "Water" in prm['chiller_type'] else 0.0
     
@@ -61,17 +61,25 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     }
 
 def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
-    scale = peak_tr / 2794.18
+    # Lock to EXACT Rev19 Load-Leveling methodology
+    scale = peak_tr / 2794.176
     
-    c_base = peak_tr * 1.25 
+    # 1. Conventional (Uses 700 TR Module Rounding matching Rev19 exactly)
+    c_working = np.ceil(peak_tr / 700.0) * 700.0
+    c_base = c_working + 700.0 # 4 Working + 1 Standby = 3500 TR for baseline
     res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, prm)
     bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", prm, res_c["dg_kva"], c_base, proj_type)
     
-    p_base, p_tes, p_dual = 2418.0 * scale, 1512.10 * scale, 189.0 * scale
+    # 2. PCM TES (Exact Chiller splits from Rev19)
+    p_base = 2498.18 * scale
+    p_dual = 295.99 * scale
+    p_tes = 1512.10 * scale
     res_p = run_thermodynamic_simulation(L8760, T8760, p_base, p_dual, p_tes, charge_hrs, prm)
     bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES Opt.", prm, res_p["dg_kva"], c_base, proj_type)
     
-    s_base, s_tes = 2280.0 * scale, 2068.0 * scale
+    # 3. Stratified TES (Exact Chiller splits from Rev19)
+    s_base = 2250.0 * scale
+    s_tes = 2067.87 * scale
     res_s = run_thermodynamic_simulation(L8760, T8760, s_base, 0, s_tes, charge_hrs, prm)
     bk_s, cap_s = calculate_capex(s_base, 0, s_tes, "Strat. TES Opt.", prm, res_s["dg_kva"], c_base, proj_type)
     

@@ -19,7 +19,7 @@ st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal
 DEFAULT_LOAD = [1676.5, 1676.5, 1676.5, 1676.5, 1676.5, 1676.5, 2235.3, 2514.7, 2794.18, 2794.18, 2794.18, 2794.18, 2794.18, 2794.18, 2514.7, 2514.7, 2235.3, 2235.3, 1955.9, 1955.9, 1676.5, 1676.5, 1676.5, 1676.5]
 DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 
-# --- SESSION STATE INITIALIZATION (STRICT AUTO-POPULATION FIX) ---
+# --- SESSION STATE INITIALIZATION (FIXES BLANK FIELDS BUG) ---
 ui_keys = {
     "proj_name": "Example Pharma Project", "location": "Ujjain, MP, India", "industry": "Pharmaceuticals", "proj_type": "Greenfield Project", 
     "tank_shape": "Cylindrical", "tes_strategy": "Partial Storage", "currency": "INR (₹)", "chiller_type": "Water-Cooled", 
@@ -63,6 +63,7 @@ st.sidebar.download_button("💾 Save Project State", json.dumps(save_dict), fil
 sym = CURRENCY_MULTIPLIERS[st.session_state.currency]["symbol"]
 mult = CURRENCY_MULTIPLIERS[st.session_state.currency]["rate"]
 
+# Initialize Master Load Table
 if "df_24" not in st.session_state:
     st.session_state["df_24"] = pd.DataFrame({
         "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": DEFAULT_LOAD,
@@ -88,7 +89,7 @@ if not st.session_state.run_sim:
             st.rerun() 
             
         st.markdown("---")
-        st.markdown("##### Calculated Operational Displays (Locked)")
+        st.markdown("##### Calculated Operational Displays (Locked from Table)")
         c1, c2, c3, c4 = st.columns(4)
         c1.number_input("Peak Load (TR)", value=calc_peak, disabled=True)
         c2.number_input("Avg Load (TR)", value=calc_avg, disabled=True)
@@ -99,60 +100,71 @@ if not st.session_state.run_sim:
         st.subheader("📌 Project Details")
         col1, col2 = st.columns(2)
         with col1:
-            st.text_input("Project Name", key="proj_name")
-            st.text_input("Location", key="location")
-            st.selectbox("Industry Sector", ["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"], key="industry")
-            st.selectbox("Currency Unit", list(CURRENCY_MULTIPLIERS.keys()), key="currency")
+            st.session_state.proj_name = st.text_input("Project Name", value=st.session_state.proj_name)
+            st.session_state.location = st.text_input("Location", value=st.session_state.location)
+            
+            industries = ["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"]
+            st.session_state.industry = st.selectbox("Industry Sector", industries, index=industries.index(st.session_state.industry))
+            
+            currencies = list(CURRENCY_MULTIPLIERS.keys())
+            st.session_state.currency = st.selectbox("Currency Unit", currencies, index=currencies.index(st.session_state.currency))
         with col2:
-            st.radio("Project Scope", ["Greenfield Project", "Brownfield / Retrofit"], key="proj_type")
-            st.selectbox("TES Strategy", ["Partial Storage", "Full Storage", "Demand Limiting"], key="tes_strategy")
-            st.selectbox("Tank Geometry", ["Cylindrical", "Rectangular"], key="tank_shape")
+            st.session_state.proj_type = st.radio("Project Scope", ["Greenfield Project", "Brownfield / Retrofit"], index=0 if st.session_state.proj_type == "Greenfield Project" else 1)
+            st.session_state.tes_strategy = st.selectbox("TES Strategy", ["Partial Storage", "Full Storage", "Demand Limiting"], index=["Partial Storage", "Full Storage", "Demand Limiting"].index(st.session_state.tes_strategy))
+            st.session_state.tank_shape = st.selectbox("Tank Geometry", ["Cylindrical", "Rectangular"], index=["Cylindrical", "Rectangular"].index(st.session_state.tank_shape))
 
     elif nav_selection == "🌡️ 3. Chiller & Aux Parameters":
         st.subheader("🌡️ Base Chiller & Auxiliary Parameters")
-        st.selectbox("Chiller Type", ["Water-Cooled", "Air-Cooled"], key="chiller_type")
+        st.session_state.chiller_type = st.selectbox("Chiller Type", ["Water-Cooled", "Air-Cooled"], index=0 if st.session_state.chiller_type == "Water-Cooled" else 1)
         c1, c2 = st.columns(2)
-        c1.number_input("CHW Supply Temp (°C)", key="chw_supply")
-        c1.number_input("Brine Supply Temp (°C)", key="brine_supply")
-        c1.number_input("Design Full Load Base Chiller (kW/TR)", key="kw_tr_base")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CHW Pump Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c1.number_input("chw_pump", key="chw_pump_kw", label_visibility="collapsed")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CT Fan Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c1.number_input("ct_fan", key="ct_fan_kw", label_visibility="collapsed")
         
-        c2.number_input("CHW Return Temp (°C)", key="chw_return")
-        c2.number_input("Brine Return Temp (°C)", key="brine_return")
-        c2.number_input("Brine Chiller Full Load (kW/TR)", key="kw_tr_brine")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Condenser Water Pump Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c2.number_input("cw_pump", key="cw_pump_kw", label_visibility="collapsed")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Brine Pump Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c2.number_input("brine_pump", key="brine_pump_kw", label_visibility="collapsed")
+        st.session_state.chw_supply = c1.number_input("CHW Supply Temp (°C)", value=st.session_state.chw_supply)
+        st.session_state.brine_supply = c1.number_input("Brine Supply Temp (°C)", value=st.session_state.brine_supply)
+        st.session_state.kw_tr_base = c1.number_input("Design Full Load Base Chiller (kW/TR)", value=st.session_state.kw_tr_base)
+        
+        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CHW Pump Power (kW/TR) [Standard Base]</span>", unsafe_allow_html=True)
+        st.session_state.chw_pump_kw = c1.number_input("chw_pump", value=st.session_state.chw_pump_kw, label_visibility="collapsed")
+        
+        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CT Fan Power (kW/TR) [Standard Base]</span>", unsafe_allow_html=True)
+        st.session_state.ct_fan_kw = c1.number_input("ct_fan", value=st.session_state.ct_fan_kw, label_visibility="collapsed")
+        
+        st.session_state.chw_return = c2.number_input("CHW Return Temp (°C)", value=st.session_state.chw_return)
+        st.session_state.brine_return = c2.number_input("Brine Return Temp (°C)", value=st.session_state.brine_return)
+        st.session_state.kw_tr_brine = c2.number_input("Brine Chiller Full Load (kW/TR)", value=st.session_state.kw_tr_brine)
+        
+        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Condenser Water Pump Power (kW/TR) [Standard Base]</span>", unsafe_allow_html=True)
+        st.session_state.cw_pump_kw = c2.number_input("cw_pump", value=st.session_state.cw_pump_kw, label_visibility="collapsed")
+        
+        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Brine Pump Power (kW/TR) [Standard Base]</span>", unsafe_allow_html=True)
+        st.session_state.brine_pump_kw = c2.number_input("brine_pump", value=st.session_state.brine_pump_kw, label_visibility="collapsed")
 
     elif nav_selection == "💰 4. Financial CAPEX Rates":
         st.subheader(f"💰 Financial Base Rates ({sym})")
-        st.number_input(f"Monthly Demand Charge (per kVA)", key="demand_rate")
+        st.session_state.demand_rate = st.number_input(f"Monthly Demand Charge (per kVA)", value=st.session_state.demand_rate)
         c1, c2 = st.columns(2)
-        c1.number_input("Water-Cooled Chiller Rate (/TR)", key="rate_water_chiller")
-        c1.number_input("Brine Chiller Rate (/TR)", key="rate_brine_chiller")
-        c1.number_input("PCM Tank Cylindrical Rate (/TRh)", key="rate_pcm_cyl")
-        c1.number_input("Stratified Tank Rate (/TRh)", key="rate_strat_tes")
-        c1.number_input("CHW Pump Rate (/TR)", key="rate_chw_pump")
-        c1.number_input("Plate Heat Exchanger Rate (/TR)", key="rate_phe_int")
-        c2.number_input("Air-Cooled Chiller Rate (/TR)", key="rate_air_chiller")
-        c2.number_input("Cooling Tower Rate (/TR)", key="rate_ct")
-        c2.number_input("PCM Tank Rectangular Rate (/TRh)", key="rate_pcm_rect")
-        c2.number_input("DG Set Rate (/kVA)", key="rate_dg")
-        c2.number_input("CDW Pump Rate (/TR)", key="rate_cw_pump")
-        c2.number_input("Transformer Rate (/kVA)", key="rate_transformer")
+        st.session_state.rate_water_chiller = c1.number_input("Water-Cooled Chiller Rate (/TR)", value=st.session_state.rate_water_chiller)
+        st.session_state.rate_brine_chiller = c1.number_input("Brine Chiller Rate (/TR)", value=st.session_state.rate_brine_chiller)
+        st.session_state.rate_pcm_cyl = c1.number_input("PCM Tank Cylindrical Rate (/TRh)", value=st.session_state.rate_pcm_cyl)
+        st.session_state.rate_strat_tes = c1.number_input("Stratified Tank Rate (/TRh)", value=st.session_state.rate_strat_tes)
+        st.session_state.rate_chw_pump = c1.number_input("CHW Pump Rate (/TR)", value=st.session_state.rate_chw_pump)
+        st.session_state.rate_phe_int = c1.number_input("Plate Heat Exchanger Rate (/TR)", value=st.session_state.rate_phe_int)
+        
+        st.session_state.rate_air_chiller = c2.number_input("Air-Cooled Chiller Rate (/TR)", value=st.session_state.rate_air_chiller)
+        st.session_state.rate_ct = c2.number_input("Cooling Tower Rate (/TR)", value=st.session_state.rate_ct)
+        st.session_state.rate_pcm_rect = c2.number_input("PCM Tank Rectangular Rate (/TRh)", value=st.session_state.rate_pcm_rect)
+        st.session_state.rate_dg = c2.number_input("DG Set Rate (/kVA)", value=st.session_state.rate_dg)
+        st.session_state.rate_cw_pump = c2.number_input("CDW Pump Rate (/TR)", value=st.session_state.rate_cw_pump)
+        st.session_state.rate_transformer = c2.number_input("Transformer Rate (/kVA)", value=st.session_state.rate_transformer)
 
     elif nav_selection == "⚡ 5. Water & Electrical Data":
         st.subheader("⚡ Water & Electrical Parameters")
         c1, c2 = st.columns(2)
-        c1.number_input("Water Cost (per kL)", key="water_cost_kl")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>Evaporation Loss (L/TRh) [Standard]</span>", unsafe_allow_html=True)
-        c1.number_input("evap_loss", key="evap_loss", label_visibility="collapsed")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Grid Emission Factor (kg CO₂/kWh) [Standard]</span>", unsafe_allow_html=True)
-        c2.number_input("grid_emission", key="grid_emission", label_visibility="collapsed")
+        st.session_state.water_cost_kl = c1.number_input("Water Cost (per kL)", value=st.session_state.water_cost_kl)
+        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>Evaporation Loss (L/TRh) [Standard Base]</span>", unsafe_allow_html=True)
+        st.session_state.evap_loss = c1.number_input("evap_loss", value=st.session_state.evap_loss, label_visibility="collapsed")
+        
+        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Grid Emission Factor (kg CO₂/kWh) [Standard Base]</span>", unsafe_allow_html=True)
+        st.session_state.grid_emission = c2.number_input("grid_emission", value=st.session_state.grid_emission, label_visibility="collapsed")
 
 else:
     # --- 7 TAB OUTPUT INTERFACE ---

@@ -15,7 +15,7 @@ class ProjectConfig(BaseModel):
     location: str = Field(default="Ujjain, MP, India")
     industry: Literal["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"] = Field(default="Pharmaceuticals")
     proj_type: Literal["Greenfield Project", "Brownfield / Retrofit"] = Field(default="Greenfield Project")
-    peak_load_tr: float = Field(default=2794.18, gt=0)
+    peak_load_tr: float = Field(default=2794.176, gt=0)
     operating_days: int = Field(default=365)
     operating_hours: int = Field(default=24)
     currency: str = Field(default="INR (₹)")
