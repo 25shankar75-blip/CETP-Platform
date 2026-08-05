@@ -44,6 +44,7 @@ class FinancialConfig(BaseModel):
     demand_rate: float = Field(default=475.0)
     water_cost_kl: float = Field(default=25.0)
     indirects_pct: float = Field(default=0.30)
+    maintenance_pct: float = Field(default=0.02)
     unit_rates: Dict[str, float] = Field(default_factory=lambda: {
         'water_cooled_chiller': 19000.0, 'air_cooled_chiller': 21000.0, 'brine_chiller': 23000.0,
         'cooling_tower': 3200.0, 'chw_pump': 900.0, 'cdw_pump': 650.0, 'brine_pump': 900.0,
