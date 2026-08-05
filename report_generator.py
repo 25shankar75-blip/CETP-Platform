@@ -19,13 +19,13 @@ def generate_pdf_report(proj_name: str, location: str, industry: str, proj_type:
     story.append(Spacer(1, 6))
     
     table_data = [list(comp_df.columns)] + comp_df.values.tolist()
-    t = Table(table_data, colWidths=[100, 75, 75, 75, 75, 75, 80, 85, 85])
+    t = Table(table_data, colWidths=[90, 65, 65, 65, 65, 65, 75, 75, 75, 70])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e3d59')), ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0,0), (-1,0), 8), ('BOTTOMPADDING', (0,0), (-1,0), 6),
+        ('FONTSIZE', (0,0), (-1,0), 7.5), ('BOTTOMPADDING', (0,0), (-1,0), 5),
         ('BACKGROUND', (0,1), (-1,-1), colors.HexColor('#f8f9fa')), ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#dee2e6')),
-        ('FONTSIZE', (0,1), (-1,-1), 8)
+        ('FONTSIZE', (0,1), (-1,-1), 7)
     ]))
     story.append(t)
     doc.build(story)

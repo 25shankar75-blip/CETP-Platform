@@ -11,37 +11,42 @@ CURRENCY_MULTIPLIERS = {
 }
 
 class ProjectConfig(BaseModel):
-    proj_name: str = Field(default="Pharma Greenfield Baseline")
-    location: str = Field(default="MP, India")
+    proj_name: str = Field(default="Example Pharma Project")
+    location: str = Field(default="Ujjain, MP, India")
     industry: Literal["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"] = Field(default="Pharmaceuticals")
     proj_type: Literal["Greenfield Project", "Brownfield / Retrofit"] = Field(default="Greenfield Project")
     peak_load_tr: float = Field(default=2794.18, gt=0)
-    tank_shape: Literal["Cylindrical (API 650)", "Rectangular Concrete/Steel"] = Field(default="Cylindrical (API 650)")
-    currency: Literal["INR (₹)", "USD ($)", "EUR (€)", "AED (د.إ)", "MYR (RM)"] = Field(default="INR (₹)")
+    operating_days: int = Field(default=365)
+    operating_hours: int = Field(default=24)
+    currency: str = Field(default="INR (₹)")
+    tes_type: Literal["PCM TES", "STRAT TES"] = Field(default="PCM TES")
+    tank_type: Literal["Cylindrical", "Rectangular"] = Field(default="Cylindrical")
+    tes_strategy: Literal["Partial Storage", "Full Storage", "Demand Limiting"] = Field(default="Partial Storage")
 
 class ThermoConfig(BaseModel):
     chw_supply: float = Field(default=7.0)
     chw_return: float = Field(default=12.0)
-    brine_supply: float = Field(default=-5.5)
+    brine_supply: float = Field(default=-5.0)
     brine_return: float = Field(default=-1.7)
-    chiller_type: Literal["Water-Cooled (With Cooling Towers)", "Air-Cooled"] = Field(default="Water-Cooled (With Cooling Towers)")
+    chiller_type: Literal["Water-Cooled", "Air-Cooled"] = Field(default="Water-Cooled")
+    kw_tr_base: float = Field(default=0.58)
+    kw_tr_brine: float = Field(default=0.85)
 
-class HydraulicConfig(BaseModel):
-    head_chw: float = Field(default=40.0)
-    head_cw: float = Field(default=30.0)
-    head_phe_penalty: float = Field(default=10.0)
-    pump_efficiency: float = Field(default=0.70)
-    ct_fan_ikw_tr: float = Field(default=0.015)
-    pcm_fom: float = Field(default=0.95)
-    strat_fom: float = Field(default=0.90)
+class AuxiliaryConfig(BaseModel):
+    chw_pump_kw_tr: float = Field(default=0.078)
+    cw_pump_kw_tr: float = Field(default=0.030)
+    ct_fan_kw_tr: float = Field(default=0.020)
+    brine_pump_kw_tr: float = Field(default=0.020)
+    water_evap_l_trh: float = Field(default=1.8)
+    grid_emission_factor: float = Field(default=0.716)
 
 class FinancialConfig(BaseModel):
     demand_rate: float = Field(default=475.0)
+    water_cost_kl: float = Field(default=25.0)
+    indirects_pct: float = Field(default=0.30)
     unit_rates: Dict[str, float] = Field(default_factory=lambda: {
-        'water_cooled_chiller': 17000.0, 'air_cooled_chiller': 19000.0, 'brine_chiller': 23000.0,
-        'cooling_tower': 2200.0, 'chw_pump': 700.0, 'cdw_pump': 550.0, 'brine_pump': 900.0,
-        'phe_and_integration': 1100.0, 'pcm_tes_cylindrical': 7533.0, 'pcm_tes_rectangular': 8475.0,
+        'water_cooled_chiller': 19000.0, 'air_cooled_chiller': 21000.0, 'brine_chiller': 23000.0,
+        'cooling_tower': 3200.0, 'chw_pump': 900.0, 'cdw_pump': 650.0, 'brine_pump': 900.0,
+        'phe': 1500.0, 'pcm_cylindrical': 7800.0, 'pcm_rectangular': 8500.0,
         'strat_tes': 18000.0, 'dg_set': 11000.0, 'transformer': 1700.0
     })
-    kw_tr_base: float = Field(default=0.58)
-    kw_tr_brine: float = Field(default=0.85)

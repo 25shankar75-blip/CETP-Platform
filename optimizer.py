@@ -1,6 +1,6 @@
 # optimizer.py
 import numpy as np
-from physics_engine import get_plv_kw_tr, get_night_condenser_bonus, calc_pump_ikw_tr, calc_vfd_pump_power
+from physics_engine import get_plv_kw_tr, get_night_condenser_bonus, calc_vfd_power
 from financial_engine import calculate_capex
 
 def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes_cap, charge_hours, prm):
@@ -10,66 +10,68 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     pwr_comp, pwr_brine, pwr_chw, pwr_cw, pwr_fan, pwr_total = np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs), np.zeros(n_hrs)
     charge_tr, discharge_tr = np.zeros(n_hrs), np.zeros(n_hrs)
     
-    kw_tr_base = prm['kw_tr_base']
-    kw_tr_brine = prm['kw_tr_brine']
-    dt_chw = abs(prm['chw_return'] - prm['chw_supply'])
-    
-    chw_pmp = calc_pump_ikw_tr(dt_chw, prm['head_chw'], prm['pump_efficiency'])
-    cw_pmp = calc_pump_ikw_tr(5.0, prm['head_cw'], prm['pump_efficiency'])
-    brine_pmp = calc_pump_ikw_tr(5.0, 40.0, prm['pump_efficiency'], True)
+    kw_chw_pmp = prm['chw_pump_kw']
+    kw_cw_pmp = prm['cw_pump_kw']
+    kw_fan = prm['ct_fan_kw']
+    kw_brine_pmp = prm['brine_pump_kw']
     
     for i in range(n_hrs):
         load, hr = load_prof[i], hr_of_day[i]
         is_night, bonus = hr in charge_hours, get_night_condenser_bonus(hr)
         
-        if tes_cap == 0: # Conventional N+1
+        if tes_cap == 0: # Conventional
             vfd = load / cap_base if cap_base > 0 else 1.0
-            pwr_comp[i] = load * get_plv_kw_tr(vfd, kw_tr_base) * bonus
-            pwr_chw[i] = calc_vfd_pump_power(chw_pmp, load, cap_base)
-            pwr_cw[i] = calc_vfd_pump_power(cw_pmp, load, cap_base) if "Water" in prm['chiller_type'] else 0
-            pwr_fan[i] = prm['ct_fan_ikw_tr'] * load * (vfd**2) if "Water" in prm['chiller_type'] else 0
-        else: # PCM or Stratified
+            pwr_comp[i] = load * get_plv_kw_tr(vfd) * bonus
+            pwr_chw[i] = calc_vfd_power(kw_chw_pmp, load, cap_base)
+            pwr_cw[i] = calc_vfd_power(kw_cw_pmp, load, cap_base) if "Water" in prm['chiller_type'] else 0
+            pwr_fan[i] = kw_fan * load * (vfd**2) if "Water" in prm['chiller_type'] else 0
+        else: # PCM or Stratified TES
             if is_night:
                 b_load = min(cap_base, load)
                 vfd = b_load / cap_base if cap_base > 0 else 1.0
-                pwr_comp[i] = b_load * get_plv_kw_tr(vfd, kw_tr_base) * bonus
-                pwr_brine[i] = cap_dual * kw_tr_brine * bonus if cap_dual > 0 else 0
-                pwr_chw[i] = calc_vfd_pump_power(chw_pmp, b_load, cap_base) + (cap_dual * brine_pmp if cap_dual > 0 else calc_vfd_pump_power(chw_pmp, tes_cap/len(charge_hours), cap_base))
-                pwr_cw[i] = calc_vfd_pump_power(cw_pmp, b_load + cap_dual + (tes_cap/len(charge_hours) if cap_dual==0 else 0), cap_base + cap_dual) if "Water" in prm['chiller_type'] else 0
-                pwr_fan[i] = prm['ct_fan_ikw_tr'] * (b_load + cap_dual + (tes_cap/len(charge_hours) if cap_dual==0 else 0)) if "Water" in prm['chiller_type'] else 0
+                pwr_comp[i] = b_load * get_plv_kw_tr(vfd) * bonus
+                pwr_brine[i] = cap_dual * prm['kw_tr_brine'] * bonus if cap_dual > 0 else 0
+                pwr_chw[i] = calc_vfd_power(kw_chw_pmp, b_load, cap_base) + (cap_dual * kw_brine_pmp if cap_dual > 0 else calc_vfd_power(kw_chw_pmp, tes_cap/len(charge_hours), cap_base))
+                pwr_cw[i] = calc_vfd_power(kw_cw_pmp, b_load + cap_dual + (tes_cap/len(charge_hours) if cap_dual==0 else 0), cap_base + cap_dual) if "Water" in prm['chiller_type'] else 0
+                pwr_fan[i] = kw_fan * (b_load + cap_dual + (tes_cap/len(charge_hours) if cap_dual==0 else 0)) if "Water" in prm['chiller_type'] else 0
                 charge_tr[i] = cap_dual if cap_dual > 0 else tes_cap/len(charge_hours)
             else:
                 b_load = cap_base if load > cap_base else load
                 disch = load - cap_base if load > cap_base else 0
                 vfd = b_load / cap_base if cap_base > 0 else 1.0
-                pwr_comp[i] = b_load * get_plv_kw_tr(vfd, kw_tr_base) * bonus
-                pwr_chw[i] = calc_vfd_pump_power(chw_pmp, b_load, cap_base) + (disch * chw_pmp)
-                pwr_cw[i] = calc_vfd_pump_power(cw_pmp, b_load, cap_base) if "Water" in prm['chiller_type'] else 0
-                pwr_fan[i] = prm['ct_fan_ikw_tr'] * b_load * (vfd**2) if "Water" in prm['chiller_type'] else 0
+                pwr_comp[i] = b_load * get_plv_kw_tr(vfd) * bonus
+                pwr_chw[i] = calc_vfd_power(kw_chw_pmp, b_load, cap_base) + (disch * kw_chw_pmp)
+                pwr_cw[i] = calc_vfd_power(kw_cw_pmp, b_load, cap_base) if "Water" in prm['chiller_type'] else 0
+                pwr_fan[i] = kw_fan * b_load * (vfd**2) if "Water" in prm['chiller_type'] else 0
                 discharge_tr[i] = disch
                 
         pwr_total[i] = pwr_comp[i] + pwr_brine[i] + pwr_chw[i] + pwr_cw[i] + pwr_fan[i]
 
     dem_kw = float(np.max(pwr_total))
-    dg_kva = (dem_kw / 0.8) * 1.25
-    opex = np.sum(pwr_total * tariff_prof) + (dg_kva * prm['demand_rate'] * 12)
+    dg_kva = (dem_kw / 0.8) * 1.15 # 15% DG margin
+    energy_kwh = np.sum(pwr_total)
+    water_kl = (np.sum(load_prof) * prm['evap_loss']) / 1000.0 if "Water" in prm['chiller_type'] else 0.0
+    
+    opex = np.sum(pwr_total * tariff_prof) + (dg_kva * prm['demand_rate'] * 12) + (water_kl * prm['water_cost_kl'])
+    emissions_tons = (energy_kwh * prm['grid_emission']) / 1000.0
+    
     return {
         "kw_comp": pwr_comp, "kw_brine": pwr_brine, "kw_chw": pwr_chw, "kw_cw": pwr_cw, "kw_fan": pwr_fan, "total_kw": pwr_total,
-        "charge": charge_tr, "discharge": discharge_tr, "dem": dem_kw, "dg_kva": dg_kva, "opex": opex
+        "charge": charge_tr, "discharge": discharge_tr, "dem": dem_kw, "dg_kva": dg_kva, "opex": opex, "emissions": emissions_tons, "water_kl": water_kl
     }
 
 def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
+    # Lock to Rev19 Load-Leveling methodology
     scale = peak_tr / 2794.18
-    c_base = peak_tr * 1.25
+    
+    c_base = peak_tr * 1.25 
     res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, prm)
     bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", prm, res_c["dg_kva"], c_base, proj_type)
     
-    # Strictly lock PCM to Rev19 1512.10 TRh logic
     p_base, p_tes, p_dual = 2418.0 * scale, 1512.10 * scale, 189.0 * scale
     res_p = run_thermodynamic_simulation(L8760, T8760, p_base, p_dual, p_tes, charge_hrs, prm)
     bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES Opt.", prm, res_p["dg_kva"], c_base, proj_type)
     
-    # Strictly lock Stratified to Rev19 2068 TRh logic
     s_base, s_tes = 2280.0 * scale, 2068.0 * scale
     res_s = run_thermodynamic_simulation(L8760, T8760, s_base, 0, s_tes, charge_hrs, prm)
     bk_s, cap_s = calculate_capex(s_base, 0, s_tes, "Strat. TES Opt.", prm, res_s["dg_kva"], c_base, proj_type)
