@@ -16,20 +16,21 @@ st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color:
 st.markdown('<p class="main-header">❄️ Cooling Energy Transition Platform (CETP)</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal Energy Storage Digital Twin</p>', unsafe_allow_html=True)
 
-DEFAULT_LOAD = [60, 60, 60, 60, 60, 60, 80, 90, 100, 100, 100, 100, 100, 100, 90, 90, 80, 80, 70, 70, 60, 60, 60, 60]
+DEFAULT_LOAD = [1676.5, 1676.5, 1676.5, 1676.5, 1676.5, 1676.5, 2235.3, 2514.7, 2794.18, 2794.18, 2794.18, 2794.18, 2794.18, 2794.18, 2514.7, 2514.7, 2235.3, 2235.3, 1955.9, 1955.9, 1676.5, 1676.5, 1676.5, 1676.5]
 DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 
-# --- SESSION STATE INITIALIZATION ---
+# --- SESSION STATE INITIALIZATION (FIXES BLANK TABS) ---
 ui_keys = {
     "proj_name": "Example Pharma Project", "location": "Ujjain, MP, India", "industry": "Pharmaceuticals", "proj_type": "Greenfield Project", 
-    "peak_load_tr": 2794.18, "tank_shape": "Cylindrical", "tes_type": "PCM TES", "tes_strategy": "Partial Storage", "currency": "INR (₹)", 
-    "chiller_type": "Water-Cooled", "chw_supply": 7.0, "chw_return": 12.0, "brine_supply": -5.0, "brine_return": -1.7, 
-    "kw_tr_base": 0.58, "kw_tr_brine": 0.85, "chw_pump_kw": 0.078, "cw_pump_kw": 0.030, "ct_fan_kw": 0.020, "brine_pump_kw": 0.020, 
-    "demand_rate": 475.0, "water_cost_kl": 25.0, "grid_emission": 0.716, "evap_loss": 1.8,
-    "rate_water_chiller": 19000.0, "rate_air_chiller": 21000.0, "rate_brine_chiller": 23000.0, "rate_pcm_cyl": 7800.0, "rate_pcm_rect": 8500.0,
-    "rate_strat_tes": 18000.0, "rate_ct": 3200.0, "rate_chw_pump": 900.0, "rate_cw_pump": 650.0, "rate_brine_pump": 900.0, "rate_phe_int": 1500.0,
-    "rate_dg": 11000.0, "rate_transformer": 1700.0, "run_sim": False
+    "tank_shape": "Cylindrical", "tes_strategy": "Partial Storage", "currency": "INR (₹)", "chiller_type": "Water-Cooled", 
+    "chw_supply": 7.0, "chw_return": 12.0, "brine_supply": -5.0, "brine_return": -1.7, "kw_tr_base": 0.58, "kw_tr_brine": 0.85, 
+    "chw_pump_kw": 0.078, "cw_pump_kw": 0.030, "ct_fan_kw": 0.020, "brine_pump_kw": 0.020, "demand_rate": 475.0, "water_cost_kl": 25.0, 
+    "grid_emission": 0.716, "evap_loss": 1.8, "rate_water_chiller": 19000.0, "rate_air_chiller": 21000.0, "rate_brine_chiller": 23000.0, 
+    "rate_pcm_cyl": 7800.0, "rate_pcm_rect": 8500.0, "rate_strat_tes": 18000.0, "rate_ct": 3200.0, "rate_chw_pump": 900.0, 
+    "rate_cw_pump": 650.0, "rate_brine_pump": 900.0, "rate_phe_int": 1500.0, "rate_dg": 11000.0, "rate_transformer": 1700.0, 
+    "run_sim": False
 }
+
 for k, v in ui_keys.items():
     if k not in st.session_state: st.session_state[k] = v
 
@@ -62,32 +63,39 @@ st.sidebar.download_button("💾 Save Project State", json.dumps(save_dict), fil
 sym = CURRENCY_MULTIPLIERS[st.session_state.currency]["symbol"]
 mult = CURRENCY_MULTIPLIERS[st.session_state.currency]["rate"]
 
+# Handle the dynamic 24-Hr Table setup
+if "df_24" not in st.session_state:
+    st.session_state["df_24"] = pd.DataFrame({
+        "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": DEFAULT_LOAD,
+        "Load (%)": [(p/2794.18)*100 for p in DEFAULT_LOAD], f"Tariff ({sym})": [t*mult for t in DEFAULT_TARIFF]
+    })
+calc_peak = float(st.session_state["df_24"]["Load (TR)"].max())
+calc_daily = float(st.session_state["df_24"]["Load (TR)"].sum())
+calc_avg = float(st.session_state["df_24"]["Load (TR)"].mean())
+
 # --- MAIN SCREEN LOGIC ---
 if not st.session_state.run_sim:
     if nav_selection == "⚙️ 1. 24-Hr Load Profile":
         st.subheader("⚙️ Hourly Load & Tariff Input")
-        if "df_24" not in st.session_state or st.session_state.get("pk") != st.session_state.peak_load_tr:
-            st.session_state["df_24"] = pd.DataFrame({
-                "Hour": [f"{i:02d}:00" for i in range(24)], "Load (%)": [float(p) for p in DEFAULT_LOAD],
-                "Load (TR)": [(p/100)*st.session_state.peak_load_tr for p in DEFAULT_LOAD], f"Tariff ({sym})": [t*mult for t in DEFAULT_TARIFF]
-            })
-            st.session_state["pk"] = st.session_state.peak_load_tr
-
         df_edit = st.data_editor(st.session_state["df_24"], use_container_width=True, num_rows="fixed", key="edit_24")
+        
+        # Bi-directional update logic for Table
         state = st.session_state.get("edit_24", {}).get("edited_rows", {})
         if state:
+            curr_peak = df_edit["Load (TR)"].max()
             for r, changes in state.items():
-                if "Load (%)" in changes: df_edit.at[int(r), "Load (TR)"] = (float(changes["Load (%)"])/100)*st.session_state.peak_load_tr
-                if "Load (TR)" in changes: df_edit.at[int(r), "Load (%)"] = (float(changes["Load (TR)"])/st.session_state.peak_load_tr)*100
+                if "Load (TR)" in changes: df_edit.at[int(r), "Load (%)"] = (float(changes["Load (TR)"])/curr_peak)*100 if curr_peak > 0 else 0
+                if "Load (%)" in changes: df_edit.at[int(r), "Load (TR)"] = (float(changes["Load (%)"])/100)*curr_peak
             st.session_state["df_24"] = df_edit.copy()
+            st.rerun() # Force re-render of greyed out stats
             
         st.markdown("---")
-        st.markdown("##### Calculated Operational Displays")
+        st.markdown("##### Calculated Operational Displays (Locked)")
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Peak Load (TR)", f"{st.session_state.peak_load_tr:,.2f}")
-        c2.metric("Avg Load (TR)", f"{st.session_state['df_24']['Load (TR)'].mean():,.2f}")
-        c3.metric("Daily Load (TRh)", f"{st.session_state['df_24']['Load (TR)'].sum():,.2f}")
-        c4.metric("Annual Load (TRh)", f"{st.session_state['df_24']['Load (TR)'].sum()*365:,.1f}")
+        c1.number_input("Peak Load (TR)", value=calc_peak, disabled=True)
+        c2.number_input("Avg Load (TR)", value=calc_avg, disabled=True)
+        c3.number_input("Daily Load (TRh)", value=calc_daily, disabled=True)
+        c4.number_input("Annual Load (TRh)", value=calc_daily*365, disabled=True)
 
     elif nav_selection == "📌 2. Project & TES Parameters":
         st.subheader("📌 Project Details")
@@ -99,7 +107,6 @@ if not st.session_state.run_sim:
             st.selectbox("Currency Unit", list(CURRENCY_MULTIPLIERS.keys()), key="currency")
         with col2:
             st.radio("Project Scope", ["Greenfield Project", "Brownfield / Retrofit"], key="proj_type")
-            st.number_input("Peak Cooling Load (TR)", key="peak_load_tr")
             st.selectbox("TES Strategy", ["Partial Storage", "Full Storage", "Demand Limiting"], key="tes_strategy")
             st.selectbox("Tank Geometry", ["Cylindrical", "Rectangular"], key="tank_shape")
 
@@ -110,13 +117,14 @@ if not st.session_state.run_sim:
         c1.number_input("CHW Supply Temp (°C)", key="chw_supply")
         c1.number_input("Brine Supply Temp (°C)", key="brine_supply")
         c1.number_input("Design Full Load Base Chiller (kW/TR)", key="kw_tr_base")
-        c1.number_input("CHW Pump Power (kW/TR)", key="chw_pump_kw")
-        c1.number_input("CT Fan Power (kW/TR)", key="ct_fan_kw")
+        c1.number_input("CHW Pump Power (kW/TR) [Locked Baseline]", value=st.session_state.chw_pump_kw, disabled=True)
+        c1.number_input("CT Fan Power (kW/TR) [Locked Baseline]", value=st.session_state.ct_fan_kw, disabled=True)
+        
         c2.number_input("CHW Return Temp (°C)", key="chw_return")
         c2.number_input("Brine Return Temp (°C)", key="brine_return")
         c2.number_input("Brine Chiller Full Load (kW/TR)", key="kw_tr_brine")
-        c2.number_input("Condenser Water Pump Power (kW/TR)", key="cw_pump_kw")
-        c2.number_input("Brine Pump Power (kW/TR)", key="brine_pump_kw")
+        c2.number_input("Condenser Water Pump Power (kW/TR) [Locked]", value=st.session_state.cw_pump_kw, disabled=True)
+        c2.number_input("Brine Pump Power (kW/TR) [Locked Baseline]", value=st.session_state.brine_pump_kw, disabled=True)
 
     elif nav_selection == "💰 4. Financial CAPEX Rates":
         st.subheader(f"💰 Financial Base Rates ({sym})")
@@ -139,8 +147,8 @@ if not st.session_state.run_sim:
         st.subheader("⚡ Water & Electrical Parameters")
         c1, c2 = st.columns(2)
         c1.number_input("Water Cost (per kL)", key="water_cost_kl")
-        c1.number_input("Evaporation Loss (L/TRh)", key="evap_loss")
-        c2.number_input("Grid Emission Factor (kg CO₂/kWh)", key="grid_emission")
+        c1.number_input("Evaporation Loss (L/TRh) [Locked Standard]", value=st.session_state.evap_loss, disabled=True)
+        c2.number_input("Grid Emission Factor (kg CO₂/kWh) [Locked Standard]", value=st.session_state.grid_emission, disabled=True)
 
 else:
     # --- 7 TAB OUTPUT INTERFACE ---
@@ -167,7 +175,7 @@ else:
     load_arr = st.session_state["df_24"]["Load (TR)"].tolist()
     tar_arr = st.session_state["df_24"][f"Tariff ({sym})"].tolist()
     charge_hrs = {22, 23, 0, 1, 2, 3, 4, 5}
-    res = optimize_plant(expand_24_to_8760(load_arr), expand_24_to_8760(tar_arr), st.session_state.peak_load_tr, charge_hrs, prm, st.session_state.proj_type)
+    res = optimize_plant(expand_24_to_8760(load_arr), expand_24_to_8760(tar_arr), calc_peak, charge_hrs, prm, st.session_state.proj_type)
     
     def render_detailed_hourly_table(data_dict):
         df_detailed = pd.DataFrame({
