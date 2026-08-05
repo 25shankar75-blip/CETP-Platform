@@ -6,11 +6,8 @@ from financial_engine import calculate_capex
 def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes_cap, charge_hours, prm, proj_type):
     n_hrs = len(load_prof)
     hr_of_day = np.arange(n_hrs) % 24
-    
-    # 1. Fetch Dynamic Weather Profile
     wbt_8760 = fetch_8760_wbt(prm['location'], prm['design_wbt'], prm['use_live_weather'])
     
-    # 2. Get Real CoolProp Thermodynamics
     cp_water, rho_water = get_fluid_cp_density(prm['chw_supply'], False, prm['use_coolprop'])
     cp_brine, rho_brine = get_fluid_cp_density(prm['brine_supply'], True, prm['use_coolprop'])
     
@@ -21,6 +18,7 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     kw_cw_pmp = prm['cw_pump_kw']
     kw_fan = prm['ct_fan_kw']
     kw_brine_pmp = prm['brine_pump_kw']
+    kw_base_chiller = prm['kw_tr_base']
     
     max_tariff = np.max(tariff_prof)
     peak_hours = set(np.where(tariff_prof >= max_tariff * 0.99)[0] % 24)
@@ -28,21 +26,19 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     for i in range(n_hrs):
         load, hr = load_prof[i], hr_of_day[i]
         is_night = hr in charge_hours
-        
-        # Dynamic Condenser Relief (1.5% improvement per 1°C WBT drop below design)
         bonus = max(0.85, 1.0 - (prm['design_wbt'] - wbt_8760[i]) * 0.015)
         
-        if tes_cap == 0: # Conventional
+        if tes_cap == 0: 
             vfd = load / cap_base if cap_base > 0 else 1.0
-            pwr_comp[i] = load * get_plv_kw_tr(vfd) * bonus
+            pwr_comp[i] = load * kw_base_chiller * get_plv_kw_tr(vfd)/0.53 * bonus # Scaled against curve baseline
             pwr_chw[i] = calc_vfd_power(kw_chw_pmp, load, cap_base)
             pwr_cw[i] = calc_vfd_power(kw_cw_pmp, load, cap_base) if "Water" in prm['chiller_type'] else 0
             pwr_fan[i] = kw_fan * load * (vfd**2) if "Water" in prm['chiller_type'] else 0
-        else: # PCM or Stratified TES
+        else: 
             if is_night:
                 b_load = min(cap_base, load)
                 vfd = b_load / cap_base if cap_base > 0 else 1.0
-                pwr_comp[i] = b_load * get_plv_kw_tr(vfd) * bonus
+                pwr_comp[i] = b_load * kw_base_chiller * get_plv_kw_tr(vfd)/0.53 * bonus
                 pwr_brine[i] = cap_dual * prm['kw_tr_brine'] * bonus if cap_dual > 0 else 0
                 pwr_chw[i] = calc_vfd_power(kw_chw_pmp, b_load, cap_base) + (cap_dual * kw_brine_pmp if cap_dual > 0 else calc_vfd_power(kw_chw_pmp, tes_cap/len(charge_hours), cap_base))
                 pwr_cw[i] = calc_vfd_power(kw_cw_pmp, b_load + cap_dual + (tes_cap/len(charge_hours) if cap_dual==0 else 0), cap_base + cap_dual) if "Water" in prm['chiller_type'] else 0
@@ -58,7 +54,7 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
                     discharge_tr[i] = load - b_load
 
                 vfd = b_load / cap_base if cap_base > 0 else 1.0
-                pwr_comp[i] = b_load * get_plv_kw_tr(vfd) * bonus
+                pwr_comp[i] = b_load * kw_base_chiller * get_plv_kw_tr(vfd)/0.53 * bonus
                 pwr_chw[i] = calc_vfd_power(kw_chw_pmp, b_load, cap_base) + (discharge_tr[i] * kw_chw_pmp)
                 pwr_cw[i] = calc_vfd_power(kw_cw_pmp, b_load, cap_base) if "Water" in prm['chiller_type'] else 0
                 pwr_fan[i] = kw_fan * b_load * (vfd**2) if "Water" in prm['chiller_type'] else 0
@@ -89,16 +85,18 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
         "opex": opex, "emissions": emissions_tons, "water_kl": water_kl, "water_cost": water_cost, "breakdown": annual_breakdown
     }
 
-def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
+def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, audit_prm, proj_type):
     scale = peak_tr / 2794.176
     module_size = prm.get('chiller_module_tr', 700.0)
     
+    # 1. Baseline runs on AUDIT parameters (The inefficient running state)
     c_working = np.ceil(peak_tr / module_size) * module_size
     c_base = c_working + module_size 
-    res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, prm, proj_type)
-    bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", prm, res_c["dg_kva"], c_base, proj_type)
-    maint_c = cap_c * prm['maintenance_pct']
+    res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, audit_prm, proj_type)
+    bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", audit_prm, res_c["dg_kva"], c_base, proj_type)
+    maint_c = cap_c * audit_prm['maintenance_pct']
     
+    # 2. PCM TES runs on DESIGN parameters (Restored operational efficiency)
     p_base = 2498.18 * scale
     p_dual = 295.99 * scale
     p_tes = 1512.10 * scale
@@ -106,6 +104,7 @@ def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
     bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES Opt.", prm, res_p["dg_kva"], c_base, proj_type)
     maint_p = cap_p * prm['maintenance_pct']
     
+    # 3. Stratified TES runs on DESIGN parameters (Restored operational efficiency)
     s_base = 2250.0 * scale
     s_tes = 2067.87 * scale
     res_s = run_thermodynamic_simulation(L8760, T8760, s_base, 0, s_tes, charge_hrs, prm, proj_type)

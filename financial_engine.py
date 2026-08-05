@@ -25,32 +25,35 @@ def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: di
     rate_elec = rates.get('dg_set', 11000) + rates.get('transformer', 1700)
     rate_phe = rates.get('phe', 1500)
     
+    # Existing equipment is a sunk cost in Brownfield
     c_chill = 0.0 if is_brownfield else rate_chiller
     c_ct = 0.0 if is_brownfield else rate_ct
+    c_pumps = 0.0 if is_brownfield else rate_pumps
+    c_elec = 0.0 if is_brownfield else rate_elec
     
     bkup = {}
     if mode == "Conventional N+1":
         bkup['Base Chillers'] = base_inst * c_chill
         bkup['Dual/Brine Chillers'] = 0.0
-        bkup['Towers & Pumps'] = base_inst * (c_ct + rate_pumps)
+        bkup['Towers & Pumps'] = base_inst * (c_ct + c_pumps)
         bkup['Storage Tank & Media'] = 0.0
-        bkup['Electrical Infra & DG'] = 0.0 if is_brownfield else (dg_kva * rate_elec)
+        bkup['Electrical Infra & DG'] = dg_kva * c_elec
         sub_eq = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG']
         bkup['Indirects & Integration (30%)'] = sub_eq * prm.get('indirects_pct', 0.30)
     elif mode == "PCM TES Opt.":
         bkup['Base Chillers'] = b_cap * c_chill
         bkup['Dual/Brine Chillers'] = d_cap * rate_brine
-        bkup['Towers & Pumps'] = (b_cap + d_cap) * (c_ct + rate_pumps)
+        bkup['Towers & Pumps'] = (b_cap * (c_ct + c_pumps)) + (d_cap * (rate_ct + rate_pumps))
         bkup['Storage Tank & Media'] = t_cap * rate_pcm
-        bkup['Electrical Infra & DG'] = 0.0 if is_brownfield else (dg_kva * rate_elec)
+        bkup['Electrical Infra & DG'] = dg_kva * c_elec
         sub_eq = bkup['Base Chillers'] + bkup['Dual/Brine Chillers'] + bkup['Towers & Pumps'] + bkup['Storage Tank & Media'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
         bkup['Indirects & Integration (30%)'] = sub_eq * prm.get('indirects_pct', 0.30)
     else: 
         bkup['Base Chillers'] = b_cap * c_chill
         bkup['Dual/Brine Chillers'] = 0.0
-        bkup['Towers & Pumps'] = b_cap * (c_ct + rate_pumps)
+        bkup['Towers & Pumps'] = b_cap * (c_ct + c_pumps)
         bkup['Storage Tank & Media'] = t_cap * rate_strat
-        bkup['Electrical Infra & DG'] = 0.0 if is_brownfield else (dg_kva * rate_elec)
+        bkup['Electrical Infra & DG'] = dg_kva * c_elec
         sub_eq = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Storage Tank & Media'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
         bkup['Indirects & Integration (30%)'] = sub_eq * prm.get('indirects_pct', 0.30)
         

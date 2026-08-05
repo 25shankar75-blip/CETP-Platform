@@ -16,8 +16,6 @@ class ProjectConfig(BaseModel):
     industry: Literal["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"] = Field(default="Pharmaceuticals")
     proj_type: Literal["Greenfield Project", "Brownfield / Retrofit"] = Field(default="Greenfield Project")
     peak_load_tr: float = Field(default=2794.176, gt=0)
-    operating_days: int = Field(default=365)
-    operating_hours: int = Field(default=24)
     currency: str = Field(default="INR (₹)")
     tes_type: Literal["PCM TES", "STRAT TES"] = Field(default="PCM TES")
     tank_type: Literal["Cylindrical", "Rectangular"] = Field(default="Cylindrical")
@@ -36,13 +34,11 @@ class ThermoConfig(BaseModel):
     kw_tr_base: float = Field(default=0.58)
     kw_tr_brine: float = Field(default=0.85)
 
-class AuxiliaryConfig(BaseModel):
-    chw_pump_kw_tr: float = Field(default=0.078)
-    cw_pump_kw_tr: float = Field(default=0.030)
-    ct_fan_kw_tr: float = Field(default=0.020)
-    brine_pump_kw_tr: float = Field(default=0.020)
-    water_evap_l_trh: float = Field(default=1.8)
-    grid_emission_factor: float = Field(default=0.716)
+class AuditConfig(BaseModel):
+    ext_kw_tr_base: float = Field(default=0.85)
+    ext_chw_pump_kw: float = Field(default=0.12)
+    ext_cw_pump_kw: float = Field(default=0.05)
+    ext_ct_fan_kw: float = Field(default=0.035)
 
 class FinancialConfig(BaseModel):
     demand_rate: float = Field(default=475.0)
