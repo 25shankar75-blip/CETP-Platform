@@ -19,7 +19,7 @@ st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal
 DEFAULT_LOAD = [1676.5, 1676.5, 1676.5, 1676.5, 1676.5, 1676.5, 2235.3, 2514.7, 2794.18, 2794.18, 2794.18, 2794.18, 2794.18, 2794.18, 2514.7, 2514.7, 2235.3, 2235.3, 1955.9, 1955.9, 1676.5, 1676.5, 1676.5, 1676.5]
 DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 
-# --- SESSION STATE INITIALIZATION (STRICT AUTO-POPULATION FIX) ---
+# --- SESSION STATE INITIALIZATION (FIXES BLANK TABS) ---
 ui_keys = {
     "proj_name": "Example Pharma Project", "location": "Ujjain, MP, India", "industry": "Pharmaceuticals", "proj_type": "Greenfield Project", 
     "tank_shape": "Cylindrical", "tes_strategy": "Partial Storage", "currency": "INR (₹)", "chiller_type": "Water-Cooled", 
@@ -63,6 +63,7 @@ st.sidebar.download_button("💾 Save Project State", json.dumps(save_dict), fil
 sym = CURRENCY_MULTIPLIERS[st.session_state.currency]["symbol"]
 mult = CURRENCY_MULTIPLIERS[st.session_state.currency]["rate"]
 
+# Handle the dynamic 24-Hr Table setup
 if "df_24" not in st.session_state:
     st.session_state["df_24"] = pd.DataFrame({
         "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": DEFAULT_LOAD,
@@ -78,6 +79,7 @@ if not st.session_state.run_sim:
         st.subheader("⚙️ Hourly Load & Tariff Input")
         df_edit = st.data_editor(st.session_state["df_24"], use_container_width=True, num_rows="fixed", key="edit_24")
         
+        # Bi-directional update logic for Table
         state = st.session_state.get("edit_24", {}).get("edited_rows", {})
         if state:
             curr_peak = df_edit["Load (TR)"].max()
@@ -85,7 +87,7 @@ if not st.session_state.run_sim:
                 if "Load (TR)" in changes: df_edit.at[int(r), "Load (%)"] = (float(changes["Load (TR)"])/curr_peak)*100 if curr_peak > 0 else 0
                 if "Load (%)" in changes: df_edit.at[int(r), "Load (TR)"] = (float(changes["Load (%)"])/100)*curr_peak
             st.session_state["df_24"] = df_edit.copy()
-            st.rerun() 
+            st.rerun() # Force re-render of greyed out stats
             
         st.markdown("---")
         st.markdown("##### Calculated Operational Displays (Locked)")
@@ -115,18 +117,14 @@ if not st.session_state.run_sim:
         c1.number_input("CHW Supply Temp (°C)", key="chw_supply")
         c1.number_input("Brine Supply Temp (°C)", key="brine_supply")
         c1.number_input("Design Full Load Base Chiller (kW/TR)", key="kw_tr_base")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CHW Pump Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c1.number_input("chw_pump", key="chw_pump_kw", label_visibility="collapsed")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CT Fan Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c1.number_input("ct_fan", key="ct_fan_kw", label_visibility="collapsed")
+        c1.number_input("CHW Pump Power (kW/TR) [Locked Baseline]", value=st.session_state.chw_pump_kw, disabled=True)
+        c1.number_input("CT Fan Power (kW/TR) [Locked Baseline]", value=st.session_state.ct_fan_kw, disabled=True)
         
         c2.number_input("CHW Return Temp (°C)", key="chw_return")
         c2.number_input("Brine Return Temp (°C)", key="brine_return")
         c2.number_input("Brine Chiller Full Load (kW/TR)", key="kw_tr_brine")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Condenser Water Pump Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c2.number_input("cw_pump", key="cw_pump_kw", label_visibility="collapsed")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Brine Pump Power (kW/TR) [Standard]</span>", unsafe_allow_html=True)
-        c2.number_input("brine_pump", key="brine_pump_kw", label_visibility="collapsed")
+        c2.number_input("Condenser Water Pump Power (kW/TR) [Locked]", value=st.session_state.cw_pump_kw, disabled=True)
+        c2.number_input("Brine Pump Power (kW/TR) [Locked Baseline]", value=st.session_state.brine_pump_kw, disabled=True)
 
     elif nav_selection == "💰 4. Financial CAPEX Rates":
         st.subheader(f"💰 Financial Base Rates ({sym})")
@@ -149,10 +147,8 @@ if not st.session_state.run_sim:
         st.subheader("⚡ Water & Electrical Parameters")
         c1, c2 = st.columns(2)
         c1.number_input("Water Cost (per kL)", key="water_cost_kl")
-        c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>Evaporation Loss (L/TRh) [Standard]</span>", unsafe_allow_html=True)
-        c1.number_input("evap_loss", key="evap_loss", label_visibility="collapsed")
-        c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Grid Emission Factor (kg CO₂/kWh) [Standard]</span>", unsafe_allow_html=True)
-        c2.number_input("grid_emission", key="grid_emission", label_visibility="collapsed")
+        c1.number_input("Evaporation Loss (L/TRh) [Locked Standard]", value=st.session_state.evap_loss, disabled=True)
+        c2.number_input("Grid Emission Factor (kg CO₂/kWh) [Locked Standard]", value=st.session_state.grid_emission, disabled=True)
 
 else:
     # --- 7 TAB OUTPUT INTERFACE ---
