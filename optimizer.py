@@ -61,7 +61,6 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     }
 
 def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
-    # Lock to Rev19 Load-Leveling methodology
     scale = peak_tr / 2794.18
     
     c_base = peak_tr * 1.25 
