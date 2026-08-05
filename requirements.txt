@@ -1,4 +1,5 @@
-streamlit>=1.40.0
+streamlit==1.40.0
+starlette==0.39.2
 pandas
 numpy
 pydantic
