@@ -36,7 +36,6 @@ def generate_word_report(proj_name: str, location: str, industry: str, proj_type
     try:
         import docx
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.shared import Pt
     except ImportError: return None
         
     doc = docx.Document()

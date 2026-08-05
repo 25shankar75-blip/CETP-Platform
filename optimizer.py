@@ -22,13 +22,13 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
         load, hr = load_prof[i], hr_of_day[i]
         is_night, bonus = hr in charge_hours, get_night_condenser_bonus(hr)
         
-        if tes_cap == 0:
+        if tes_cap == 0: # Conventional N+1
             vfd = load / cap_base if cap_base > 0 else 1.0
             pwr_comp[i] = load * get_plv_kw_tr(vfd, kw_tr_base) * bonus
             pwr_chw[i] = calc_vfd_pump_power(chw_pmp, load, cap_base)
             pwr_cw[i] = calc_vfd_pump_power(cw_pmp, load, cap_base) if "Water" in prm['chiller_type'] else 0
             pwr_fan[i] = prm['ct_fan_ikw_tr'] * load * (vfd**2) if "Water" in prm['chiller_type'] else 0
-        else: 
+        else: # PCM or Stratified
             if is_night:
                 b_load = min(cap_base, load)
                 vfd = b_load / cap_base if cap_base > 0 else 1.0
@@ -64,13 +64,15 @@ def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
     res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, prm)
     bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", prm, res_c["dg_kva"], c_base, proj_type)
     
+    # Strictly lock PCM to Rev19 1512.10 TRh logic
     p_base, p_tes, p_dual = 2418.0 * scale, 1512.10 * scale, 189.0 * scale
     res_p = run_thermodynamic_simulation(L8760, T8760, p_base, p_dual, p_tes, charge_hrs, prm)
-    bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES", prm, res_p["dg_kva"], c_base, proj_type)
+    bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES Opt.", prm, res_p["dg_kva"], c_base, proj_type)
     
+    # Strictly lock Stratified to Rev19 2068 TRh logic
     s_base, s_tes = 2280.0 * scale, 2068.0 * scale
     res_s = run_thermodynamic_simulation(L8760, T8760, s_base, 0, s_tes, charge_hrs, prm)
-    bk_s, cap_s = calculate_capex(s_base, 0, s_tes, "Stratified TES", prm, res_s["dg_kva"], c_base, proj_type)
+    bk_s, cap_s = calculate_capex(s_base, 0, s_tes, "Strat. TES Opt.", prm, res_s["dg_kva"], c_base, proj_type)
     
     pb_p = (cap_p - cap_c) / (res_c['opex'] - res_p['opex']) if (res_c['opex'] - res_p['opex']) > 0 else 0
     pb_s = (cap_s - cap_c) / (res_c['opex'] - res_s['opex']) if (res_c['opex'] - res_s['opex']) > 0 else 0

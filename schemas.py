@@ -11,8 +11,8 @@ CURRENCY_MULTIPLIERS = {
 }
 
 class ProjectConfig(BaseModel):
-    proj_name: str = Field(default="Pharma Greenfield Plant")
-    location: str = Field(default="Ujjain, MP, India")
+    proj_name: str = Field(default="Pharma Greenfield Baseline")
+    location: str = Field(default="MP, India")
     industry: Literal["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"] = Field(default="Pharmaceuticals")
     proj_type: Literal["Greenfield Project", "Brownfield / Retrofit"] = Field(default="Greenfield Project")
     peak_load_tr: float = Field(default=2794.18, gt=0)
