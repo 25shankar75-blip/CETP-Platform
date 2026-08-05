@@ -22,13 +22,17 @@ class ProjectConfig(BaseModel):
     tes_type: Literal["PCM TES", "STRAT TES"] = Field(default="PCM TES")
     tank_type: Literal["Cylindrical", "Rectangular"] = Field(default="Cylindrical")
     tes_strategy: Literal["Partial Storage", "Full Storage", "Demand Limiting"] = Field(default="Partial Storage")
+    use_live_weather: bool = Field(default=True)
+    use_coolprop: bool = Field(default=True)
 
 class ThermoConfig(BaseModel):
+    chiller_type: Literal["Water-Cooled", "Air-Cooled"] = Field(default="Water-Cooled")
+    chiller_module_tr: float = Field(default=700.0)
+    design_wbt: float = Field(default=28.0)
     chw_supply: float = Field(default=7.0)
     chw_return: float = Field(default=12.0)
     brine_supply: float = Field(default=-5.0)
     brine_return: float = Field(default=-1.7)
-    chiller_type: Literal["Water-Cooled", "Air-Cooled"] = Field(default="Water-Cooled")
     kw_tr_base: float = Field(default=0.58)
     kw_tr_brine: float = Field(default=0.85)
 

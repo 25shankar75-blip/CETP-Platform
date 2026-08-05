@@ -19,7 +19,6 @@ def generate_pdf_report(proj_name: str, location: str, industry: str, proj_type:
     story.append(Spacer(1, 6))
     
     table_data = [list(comp_df.columns)] + comp_df.values.tolist()
-    # Adjusted column widths to fit 4 columns on the PDF
     col_widths = [200, 150, 150, 150]
     t = Table(table_data, colWidths=col_widths)
     t.setStyle(TableStyle([

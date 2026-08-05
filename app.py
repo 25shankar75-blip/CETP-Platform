@@ -16,7 +16,6 @@ st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color:
 st.markdown('<p class="main-header">❄️ Cooling Energy Transition Platform (CETP)</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal Energy Storage Digital Twin</p>', unsafe_allow_html=True)
 
-# Exact Rev19 Baseline Profile
 DEFAULT_LOAD = [1047.816]*8 + [1746.36]*2 + [2095.632]*4 + [2794.176]*4 + [2444.904]*2 + [2095.632]*2 + [1397.088]*2
 DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 
@@ -24,6 +23,7 @@ DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 ui_keys = {
     "proj_name": "Example Pharma Project", "location": "Ujjain, MP, India", "industry": "Pharmaceuticals", "proj_type": "Greenfield Project", 
     "tank_shape": "Cylindrical", "tes_strategy": "Partial Storage", "currency": "INR (₹)", "chiller_type": "Water-Cooled", 
+    "chiller_module_tr": 700.0, "design_wbt": 28.0, "use_live_weather": True, "use_coolprop": True,
     "chw_supply": 7.0, "chw_return": 12.0, "brine_supply": -5.0, "brine_return": -1.7, "kw_tr_base": 0.58, "kw_tr_brine": 0.85, 
     "chw_pump_kw": 0.078, "cw_pump_kw": 0.030, "ct_fan_kw": 0.020, "brine_pump_kw": 0.020, "demand_rate": 475.0, "water_cost_kl": 25.0, 
     "grid_emission": 0.716, "evap_loss": 1.8, "rate_water_chiller": 19000.0, "rate_air_chiller": 21000.0, "rate_brine_chiller": 23000.0, 
@@ -106,15 +106,19 @@ if not st.session_state.run_sim:
         c4.number_input("Annual Load (TRh)", value=calc_daily*365, disabled=True)
 
     elif nav_selection == "📌 2. Project & TES Parameters":
-        st.subheader("📌 Project Details")
+        st.subheader("📌 Project Details & API Integrations")
         col1, col2 = st.columns(2)
         with col1:
             st.session_state.proj_name = st.text_input("Project Name", value=st.session_state.proj_name)
-            st.session_state.location = st.text_input("Location", value=st.session_state.location)
+            st.session_state.location = st.text_input("Location (For Weather API)", value=st.session_state.location)
             industries = ["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"]
             st.session_state.industry = st.selectbox("Industry Sector", industries, index=industries.index(st.session_state.industry))
             currencies = list(CURRENCY_MULTIPLIERS.keys())
             st.session_state.currency = st.selectbox("Currency Unit", currencies, index=currencies.index(st.session_state.currency))
+            st.markdown("---")
+            st.session_state.use_live_weather = st.checkbox("📡 Enable Live Open-Meteo Weather API (8760 WBT)", value=st.session_state.use_live_weather)
+            st.session_state.use_coolprop = st.checkbox("⚗️ Enable CoolProp Thermodynamic Fluid Analysis", value=st.session_state.use_coolprop)
+            
         with col2:
             st.session_state.proj_type = st.radio("Project Scope", ["Greenfield Project", "Brownfield / Retrofit"], index=0 if st.session_state.proj_type == "Greenfield Project" else 1)
             st.session_state.tes_strategy = st.selectbox("TES Strategy", ["Partial Storage", "Full Storage", "Demand Limiting"], index=["Partial Storage", "Full Storage", "Demand Limiting"].index(st.session_state.tes_strategy))
@@ -122,11 +126,14 @@ if not st.session_state.run_sim:
 
     elif nav_selection == "🌡️ 3. Chiller & Aux Parameters":
         st.subheader("🌡️ Base Chiller & Auxiliary Parameters")
-        st.session_state.chiller_type = st.selectbox("Chiller Type", ["Water-Cooled", "Air-Cooled"], index=0 if st.session_state.chiller_type == "Water-Cooled" else 1)
         c1, c2 = st.columns(2)
+        st.session_state.chiller_type = c1.selectbox("Chiller Type", ["Water-Cooled", "Air-Cooled"], index=0 if st.session_state.chiller_type == "Water-Cooled" else 1)
+        st.session_state.chiller_module_tr = c2.number_input("Standard Chiller Module Size (TR)", value=st.session_state.chiller_module_tr)
+        
         st.session_state.chw_supply = c1.number_input("CHW Supply Temp (°C)", value=st.session_state.chw_supply)
         st.session_state.brine_supply = c1.number_input("Brine Supply Temp (°C)", value=st.session_state.brine_supply)
         st.session_state.kw_tr_base = c1.number_input("Design Full Load Base Chiller (kW/TR)", value=st.session_state.kw_tr_base)
+        st.session_state.design_wbt = c1.number_input("Design WBT (°C) for Efficiency Baseline", value=st.session_state.design_wbt)
         
         c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>CHW Pump Power (kW/TR) [Standard Base]</span>", unsafe_allow_html=True)
         st.session_state.chw_pump_kw = c1.number_input("chw_pump", value=st.session_state.chw_pump_kw, label_visibility="collapsed")
@@ -184,18 +191,21 @@ else:
     }
     
     prm = {
+        "location": st.session_state.location, "design_wbt": st.session_state.design_wbt, "use_live_weather": st.session_state.use_live_weather, "use_coolprop": st.session_state.use_coolprop,
         "chw_supply": st.session_state.chw_supply, "chw_return": st.session_state.chw_return, "brine_supply": st.session_state.brine_supply, 
         "brine_return": st.session_state.brine_return, "kw_tr_base": st.session_state.kw_tr_base, "kw_tr_brine": st.session_state.kw_tr_brine, 
         "chw_pump_kw": st.session_state.chw_pump_kw, "cw_pump_kw": st.session_state.cw_pump_kw, "ct_fan_kw": st.session_state.ct_fan_kw, 
         "brine_pump_kw": st.session_state.brine_pump_kw, "evap_loss": st.session_state.evap_loss, "water_cost_kl": st.session_state.water_cost_kl*mult,
-        "grid_emission": st.session_state.grid_emission, 'unit_rates': rates, 'chiller_type': st.session_state.chiller_type, 
+        "grid_emission": st.session_state.grid_emission, 'unit_rates': rates, 'chiller_type': st.session_state.chiller_type, 'chiller_module_tr': st.session_state.chiller_module_tr,
         'tank_shape': st.session_state.tank_shape, 'demand_rate': st.session_state.demand_rate*mult, "indirects_pct": 0.30, "maintenance_pct": 0.02
     }
     
     load_arr = st.session_state["df_24"]["Load (TR)"].tolist()
     tar_arr = st.session_state["df_24"][f"Tariff ({sym})"].tolist()
     charge_hrs = {22, 23, 0, 1, 2, 3, 4, 5}
-    res = optimize_plant(expand_24_to_8760(load_arr), expand_24_to_8760(tar_arr), calc_peak, charge_hrs, prm, st.session_state.proj_type)
+    
+    with st.spinner("Fetching Weather Data & Executing Mathematical Optimization..."):
+        res = optimize_plant(expand_24_to_8760(load_arr), expand_24_to_8760(tar_arr), calc_peak, charge_hrs, prm, st.session_state.proj_type)
     
     def render_detailed_hourly_table(data_dict):
         df_detailed = pd.DataFrame({
