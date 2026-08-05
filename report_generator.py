@@ -60,7 +60,7 @@ def generate_pdf_report(proj_name: str, location: str, industry: str, proj_type:
     story.append(Paragraph(f"Location: {location} | Scope: {proj_type} | Currency: {currency}"))
     story.append(Spacer(1, 10))
     
-    t = Table([list(comp_df.columns)] + comp_df.values.tolist(), colWidths=[200, 150, 150, 150])
+    t = Table([list(comp_df.columns)] + comp_df.values.tolist(), colWidths=[180, 140, 140, 140])
     t.setStyle(TableStyle([
         ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1e3d59')), ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
         ('ALIGN', (0,0), (-1,-1), 'CENTER'), ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),

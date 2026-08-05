@@ -45,11 +45,11 @@ ui_keys = {
     "ext_chw_flow": 450.0, "ext_chw_sup": 9.0, "ext_chw_ret": 14.0, "ext_chw_head": 35.0,
     "ext_cw_flow": 550.0, "ext_cw_sup": 32.0, "ext_cw_ret": 37.0, "ext_cw_head": 25.0,
     "ext_ct_fan_kw": 45.0, "ext_chiller_kw_tr": 0.85,
-    "demand_rate": 475.0, "water_cost_kl": 25.0, 
+    "operating_days": 325, "dg_outage_hrs": 2.5, "dg_tariff": 28.0, "demand_rate": 475.0, "water_cost_kl": 25.0, 
     "grid_emission": 0.716, "evap_loss": 1.8, "rate_water_chiller": 19000.0, "rate_air_chiller": 21000.0, "rate_brine_chiller": 23000.0, 
     "rate_pcm_cyl": 7800.0, "rate_pcm_rect": 8500.0, "rate_strat_tes": 18000.0, "rate_ct": 3200.0, "rate_chw_pump": 900.0, 
     "rate_cw_pump": 650.0, "rate_brine_pump": 900.0, "rate_phe_int": 1500.0, "rate_dg": 11000.0, "rate_transformer": 1700.0, 
-    "run_sim": False
+    "run_sim": False, "retrofit_blanked": False
 }
 
 for k, v in ui_keys.items():
@@ -58,7 +58,6 @@ for k, v in ui_keys.items():
 def reset_sim(): st.session_state.run_sim = False
 
 st.sidebar.header("🛠️ Input Master Suite")
-# Reordered Nav: Project Details first, Load Profile second.
 nav_selection = st.sidebar.radio("Navigation Menu", ["📌 1. Project Details & Scope", "⚙️ 2. 24-Hr Load Profile", "🌡️ 3. Chiller & Retrofit Audit", "💰 4. Financial CAPEX Rates", "⚡ 5. Water & Electrical Data"], on_change=reset_sim)
 
 st.sidebar.markdown("---")
@@ -88,11 +87,16 @@ mult = CURRENCIES[st.session_state.currency]["rate"]
 if "df_24" not in st.session_state:
     st.session_state["df_24"] = pd.DataFrame({
         "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": DEFAULT_LOAD,
-        "Load (%)": [(p/2794.176)*100 for p in DEFAULT_LOAD], f"Tariff ({sym})": [t*mult for t in DEFAULT_TARIFF]
+        f"Tariff ({sym})": [t*mult for t in DEFAULT_TARIFF]
     })
-calc_peak = float(st.session_state["df_24"]["Load (TR)"].max())
-calc_daily = float(st.session_state["df_24"]["Load (TR)"].sum())
-calc_avg = float(st.session_state["df_24"]["Load (TR)"].mean())
+
+# Retrofit Conditional Blanking
+if st.session_state.proj_type == "Brownfield / Retrofit" and not st.session_state.retrofit_blanked:
+    st.session_state["df_24"]["Load (TR)"] = 0.0
+    st.session_state["df_24"][f"Tariff ({sym})"] = 0.0
+    st.session_state.retrofit_blanked = True
+elif st.session_state.proj_type == "Greenfield Project":
+    st.session_state.retrofit_blanked = False
 
 # --- MAIN SCREEN LOGIC ---
 if not st.session_state.run_sim:
@@ -117,32 +121,34 @@ if not st.session_state.run_sim:
 
     elif nav_selection == "⚙️ 2. 24-Hr Load Profile":
         st.subheader("⚙️ Hourly Load & Tariff Input")
-        st.info("Edit Load (TR) and Tariff freely. The % column is reactive and auto-calculates without hanging the app.")
+        st.info("Edit Load and Tariff cells once. The % column is reactive and prevents scroll overlap.")
         
-        # Bypassed the st.rerun loop. Uses pure column config formatting.
-        edited_df = st.data_editor(
-            st.session_state["df_24"],
+        # State-isolated Data Editor (Fixes Infinite Loop & Double Entry)
+        df_display = st.session_state["df_24"].copy()
+        curr_peak = df_display["Load (TR)"].max()
+        df_display["Load (%)"] = (df_display["Load (TR)"] / curr_peak * 100) if curr_peak > 0 else 0.0
+        
+        edited = st.data_editor(
+            df_display,
             use_container_width=True,
-            num_rows="fixed",
+            hide_index=True,
             column_config={
-                "Hour": st.column_config.TextColumn("Hour", disabled=True),
-                "Load (TR)": st.column_config.NumberColumn("Load (TR)", format="%.1f TR"),
-                "Load (%)": st.column_config.NumberColumn("Load (%)", disabled=True, format="%.1f %%"),
-                f"Tariff ({sym})": st.column_config.NumberColumn(f"Tariff ({sym})", format="%.2f")
-            },
-            key="edit_24_table"
+                "Hour": st.column_config.TextColumn("Hour", disabled=True, width="small"),
+                "Load (TR)": st.column_config.NumberColumn("Load (TR)", format="%.1f", min_value=0.0, width="medium"),
+                "Load (%)": st.column_config.NumberColumn("Load (%)", format="%.1f %%", disabled=True, width="small"),
+                f"Tariff ({sym})": st.column_config.NumberColumn(f"Tariff ({sym})", format="%.2f", min_value=0.0, width="medium")
+            }
         )
-        curr_peak = edited_df["Load (TR)"].max()
-        edited_df["Load (%)"] = (edited_df["Load (TR)"] / curr_peak * 100).fillna(0)
-        st.session_state["df_24"] = edited_df
+        st.session_state["df_24"]["Load (TR)"] = edited["Load (TR)"]
+        st.session_state["df_24"][f"Tariff ({sym})"] = edited[f"Tariff ({sym})"]
             
         st.markdown("---")
-        st.markdown("##### Calculated Operational Displays (Locked from Table)")
+        st.markdown("##### Calculated Operational Displays")
         c1, c2, c3, c4 = st.columns(4)
-        c1.number_input("Peak Load (TR)", value=curr_peak, disabled=True)
-        c2.number_input("Avg Load (TR)", value=edited_df["Load (TR)"].mean(), disabled=True)
-        c3.number_input("Daily Load (TRh)", value=edited_df["Load (TR)"].sum(), disabled=True)
-        c4.number_input("Annual Load (TRh)", value=edited_df["Load (TR)"].sum()*365, disabled=True)
+        c1.metric("Peak Load (TR)", f"{st.session_state['df_24']['Load (TR)'].max():.1f}")
+        c2.metric("Avg Load (TR)", f"{st.session_state['df_24']['Load (TR)'].mean():.1f}")
+        c3.metric("Daily Load (TRh)", f"{st.session_state['df_24']['Load (TR)'].sum():.1f}")
+        c4.metric("Annual Load (TRh)", f"{st.session_state['df_24']['Load (TR)'].sum()*st.session_state.operating_days:.1f}")
 
     elif nav_selection == "🌡️ 3. Chiller & Retrofit Audit":
         if "Brownfield" in st.session_state.proj_type:
@@ -173,9 +179,9 @@ if not st.session_state.run_sim:
             ext_chw_pump_kw = (st.session_state.ext_chw_flow / 3600) * st.session_state.ext_chw_head * 9.81 * 1000 / 0.70 / 1000
             ext_cw_pump_kw = (st.session_state.ext_cw_flow / 3600) * st.session_state.ext_cw_head * 9.81 * 1000 / 0.70 / 1000
             
-            st.session_state.ext_chw_pump_kw_tr = ext_chw_pump_kw / ext_chw_tr if ext_chw_tr > 0 else 0
-            st.session_state.ext_cw_pump_kw_tr = ext_cw_pump_kw / ext_chw_tr if ext_chw_tr > 0 else 0
-            st.session_state.ext_ct_fan_kw_tr = st.session_state.ext_ct_fan_kw / ext_chw_tr if ext_chw_tr > 0 else 0
+            st.session_state.ext_chw_pump_kw_tr = ext_chw_pump_kw / ext_chw_tr if ext_chw_tr > 0 else 0.12
+            st.session_state.ext_cw_pump_kw_tr = ext_cw_pump_kw / ext_chw_tr if ext_chw_tr > 0 else 0.05
+            st.session_state.ext_ct_fan_kw_tr = st.session_state.ext_ct_fan_kw / ext_chw_tr if ext_chw_tr > 0 else 0.035
 
             st.markdown("##### 📊 Real-Time Diagnostic Results")
             r1, r2, r3, r4 = st.columns(4)
@@ -231,12 +237,16 @@ if not st.session_state.run_sim:
         st.session_state.rate_transformer = c2.number_input("Transformer Rate (/kVA)", value=st.session_state.rate_transformer)
 
     elif nav_selection == "⚡ 5. Water & Electrical Data":
-        st.subheader("⚡ Water & Electrical Parameters")
+        st.subheader("⚡ Water, Electrical & DG Blackout Parameters")
         c1, c2 = st.columns(2)
+        st.session_state.operating_days = c1.number_input("Annual Operating Days", value=st.session_state.operating_days)
         st.session_state.water_cost_kl = c1.number_input("Water Cost (per kL)", value=st.session_state.water_cost_kl)
         c1.markdown("<span style='color:#1f77b4; font-weight:bold;'>Evaporation Loss (L/TRh) [Standard Base]</span>", unsafe_allow_html=True)
         st.session_state.evap_loss = c1.number_input("evap_loss", value=st.session_state.evap_loss, label_visibility="collapsed")
         
+        c2.markdown("### 🔌 Diesel Generator (DG) Analysis")
+        st.session_state.dg_outage_hrs = c2.number_input("Avg Daily Power Outage (Hrs/Day)", value=st.session_state.dg_outage_hrs)
+        st.session_state.dg_tariff = c2.number_input("DG Generation Tariff (per kWh)", value=st.session_state.dg_tariff)
         c2.markdown("<span style='color:#1f77b4; font-weight:bold;'>Grid Emission Factor (kg CO₂/kWh) [Standard Base]</span>", unsafe_allow_html=True)
         st.session_state.grid_emission = c2.number_input("grid_emission", value=st.session_state.grid_emission, label_visibility="collapsed")
 
@@ -259,13 +269,14 @@ else:
         "chw_pump_kw": st.session_state.chw_pump_kw, "cw_pump_kw": st.session_state.cw_pump_kw, "ct_fan_kw": st.session_state.ct_fan_kw, 
         "brine_pump_kw": st.session_state.brine_pump_kw, "evap_loss": st.session_state.evap_loss, "water_cost_kl": st.session_state.water_cost_kl*mult,
         "grid_emission": st.session_state.grid_emission, 'unit_rates': rates, 'chiller_type': st.session_state.chiller_type, 'chiller_module_tr': st.session_state.chiller_module_tr,
-        'tank_shape': st.session_state.tank_shape, 'demand_rate': st.session_state.demand_rate*mult, "indirects_pct": 0.30, "maintenance_pct": 0.02
+        'tank_shape': st.session_state.tank_shape, 'demand_rate': st.session_state.demand_rate*mult, "indirects_pct": 0.30, "maintenance_pct": 0.02,
+        'operating_days': st.session_state.operating_days, 'dg_outage_hrs': st.session_state.dg_outage_hrs, 'dg_tariff': st.session_state.dg_tariff*mult
     }
     
     audit_prm = prm.copy()
     if "Brownfield" in st.session_state.proj_type:
         audit_prm.update({
-            "kw_tr_base": st.session_state.ext_chiller_kw_tr,
+            "kw_tr_base": st.session_state.get('ext_chiller_kw_tr', 0.85),
             "chw_pump_kw": st.session_state.get('ext_chw_pump_kw_tr', 0.12),
             "cw_pump_kw": st.session_state.get('ext_cw_pump_kw_tr', 0.05),
             "ct_fan_kw": st.session_state.get('ext_ct_fan_kw_tr', 0.035)
@@ -274,16 +285,18 @@ else:
     load_arr = st.session_state["df_24"]["Load (TR)"].tolist()
     tar_arr = st.session_state["df_24"][f"Tariff ({sym})"].tolist()
     charge_hrs = {22, 23, 0, 1, 2, 3, 4, 5}
+    calc_peak = max(load_arr)
     
     with st.spinner("Fetching Weather Data & Executing Mathematical Optimization..."):
         res = optimize_plant(expand_24_to_8760(load_arr), expand_24_to_8760(tar_arr), calc_peak, charge_hrs, prm, audit_prm, st.session_state.proj_type)
     
     def render_detailed_hourly_table(data_dict):
         df_detailed = pd.DataFrame({
-            "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": load_arr[:24], "Charge (TR)": data_dict['data']['charge'][:24],
-            "Discharge (TR)": data_dict['data']['discharge'][:24], "Base Chiller (kW)": data_dict['data']['kw_comp'][:24],
-            "Brine Chiller (kW)": data_dict['data']['kw_brine'][:24], "CHW Pump (kW)": data_dict['data']['kw_chw'][:24],
-            "CDW Pump (kW)": data_dict['data']['kw_cw'][:24], "CT Fan (kW)": data_dict['data']['kw_fan'][:24], "Total Sys (kW)": data_dict['data']['total_kw'][:24]
+            "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": load_arr[:24], f"Tariff ({sym})": data_dict['data']['tariff'][:24],
+            "Charge (TR)": data_dict['data']['charge'][:24], "Discharge (TR)": data_dict['data']['discharge'][:24], 
+            "Base Chiller (kW)": data_dict['data']['kw_comp'][:24], "Brine Chiller (kW)": data_dict['data']['kw_brine'][:24], 
+            "CHW Pump (kW)": data_dict['data']['kw_chw'][:24], "CDW Pump (kW)": data_dict['data']['kw_cw'][:24], 
+            "CT Fan (kW)": data_dict['data']['kw_fan'][:24], "Total Sys (kW)": data_dict['data']['total_kw'][:24]
         })
         st.dataframe(df_detailed.style.format(precision=1), use_container_width=True, hide_index=True)
 
@@ -333,24 +346,24 @@ else:
         render_detailed_hourly_table(res['s'])
 
     df_comp = pd.DataFrame({
-        "Parameter": ["Installed Chiller (TR)", "TES Capacity (TRh)", "Peak Demand (kW)", "Transformer (kVA)", "Electricity Cons. (kWh)", "Electricity Cost", "Water Cons. (kL)", "Water Cost", "Carbon Emissions (kgCO2)", "Annual Maint. Cost", "Total Annual OPEX", "Total Plant CAPEX", "Annual Savings", "Incremental CAPEX", "Simple Payback (Yrs)"],
+        "Parameter": ["Installed Chiller (TR)", "TES Capacity (TRh)", "Peak Demand (kW)", "Transformer (kVA)", "Electricity Cons. (kWh)", "Electricity Cost", "Water Cons. (kL)", "Water Cost", "Carbon Emissions (kgCO2)", "Annual Maint. Cost", "Annual DG OPEX", "Total Annual OPEX", "Annual DG Savings", "Total Annual Savings", "Incremental CAPEX", "Simple Payback (Yrs)"],
         "Conventional N+1": [
             f"{res['c']['cap_base']:,.0f}", "0", f"{res['c']['dem']:,.0f}", f"{res['c']['dg_kva']:,.0f}", f"{res['c']['data']['energy_kwh']:,.0f}", 
             format_currency(res['c']['data']['energy_cost'], st.session_state.currency), f"{res['c']['data']['water_kl']:,.0f}", format_currency(res['c']['data']['water_cost'], st.session_state.currency), 
-            f"{res['c']['data']['emissions']*1000:,.0f}", format_currency(res['c']['maint'], st.session_state.currency), format_currency(res['c']['tot_op'], st.session_state.currency), 
-            format_currency(res['c']['capex'], st.session_state.currency), "Baseline", "Baseline", "Baseline"
+            f"{res['c']['data']['emissions']*1000:,.0f}", format_currency(res['c']['maint'], st.session_state.currency), format_currency(res['c']['data']['annual_dg_cost'], st.session_state.currency), format_currency(res['c']['tot_op'], st.session_state.currency), 
+            "Baseline", "Baseline", format_currency(res['c']['capex'], st.session_state.currency), "Baseline"
         ],
         "PCM TES Opt.": [
             f"{res['p']['cap_base'] + res['p']['cap_dual']:,.0f}", f"{res['p']['cap_tes']:,.0f}", f"{res['p']['dem']:,.0f}", f"{res['p']['dg_kva']:,.0f}", f"{res['p']['data']['energy_kwh']:,.0f}", 
             format_currency(res['p']['data']['energy_cost'], st.session_state.currency), f"{res['p']['data']['water_kl']:,.0f}", format_currency(res['p']['data']['water_cost'], st.session_state.currency), 
-            f"{res['p']['data']['emissions']*1000:,.0f}", format_currency(res['p']['maint'], st.session_state.currency), format_currency(res['p']['tot_op'], st.session_state.currency), 
-            format_currency(res['p']['capex'], st.session_state.currency), format_currency(res['p']['sav'], st.session_state.currency), format_currency(res['p']['inc_cap'], st.session_state.currency), f"{res['p']['pb']:.2f}"
+            f"{res['p']['data']['emissions']*1000:,.0f}", format_currency(res['p']['maint'], st.session_state.currency), format_currency(res['p']['data']['annual_dg_cost'], st.session_state.currency), format_currency(res['p']['tot_op'], st.session_state.currency), 
+            format_currency(res['p']['dg_sav'], st.session_state.currency), format_currency(res['p']['sav'], st.session_state.currency), format_currency(res['p']['inc_cap'], st.session_state.currency), f"{res['p']['pb']:.2f}"
         ],
         "Strat. TES Opt.": [
             f"{res['s']['cap_base']:,.0f}", f"{res['s']['cap_tes']:,.0f}", f"{res['s']['dem']:,.0f}", f"{res['s']['dg_kva']:,.0f}", f"{res['s']['data']['energy_kwh']:,.0f}", 
             format_currency(res['s']['data']['energy_cost'], st.session_state.currency), f"{res['s']['data']['water_kl']:,.0f}", format_currency(res['s']['data']['water_cost'], st.session_state.currency), 
-            f"{res['s']['data']['emissions']*1000:,.0f}", format_currency(res['s']['maint'], st.session_state.currency), format_currency(res['s']['tot_op'], st.session_state.currency), 
-            format_currency(res['s']['capex'], st.session_state.currency), format_currency(res['s']['sav'], st.session_state.currency), format_currency(res['s']['inc_cap'], st.session_state.currency), f"{res['s']['pb']:.2f}"
+            f"{res['s']['data']['emissions']*1000:,.0f}", format_currency(res['s']['maint'], st.session_state.currency), format_currency(res['s']['data']['annual_dg_cost'], st.session_state.currency), format_currency(res['s']['tot_op'], st.session_state.currency), 
+            format_currency(res['s']['dg_sav'], st.session_state.currency), format_currency(res['s']['sav'], st.session_state.currency), format_currency(res['s']['inc_cap'], st.session_state.currency), f"{res['s']['pb']:.2f}"
         ]
     })
 
@@ -370,7 +383,6 @@ else:
 
     with t7:
         st.subheader("📑 Report Dashboard & Export")
-        st.info("The exported reports now contain dynamic 24-hour visual charts and a granular equipment-by-equipment (Chillers, Pumps, Fans) kWh and OPEX matrix.")
         c1, c2 = st.columns(2)
         with c1:
             pdf = generate_pdf_report(st.session_state.proj_name, st.session_state.location, st.session_state.industry, st.session_state.proj_type, st.session_state.currency, df_comp, load_arr[:24], tar_arr[:24], res, sym)

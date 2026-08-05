@@ -34,7 +34,16 @@ class ThermoConfig(BaseModel):
     kw_tr_base: float = Field(default=0.58)
     kw_tr_brine: float = Field(default=0.85)
 
+class AuditConfig(BaseModel):
+    ext_kw_tr_base: float = Field(default=0.85)
+    ext_chw_pump_kw: float = Field(default=0.12)
+    ext_cw_pump_kw: float = Field(default=0.05)
+    ext_ct_fan_kw: float = Field(default=0.035)
+
 class FinancialConfig(BaseModel):
+    operating_days: int = Field(default=325)
+    dg_outage_hrs: float = Field(default=2.5)
+    dg_tariff: float = Field(default=28.0)
     demand_rate: float = Field(default=475.0)
     water_cost_kl: float = Field(default=25.0)
     indirects_pct: float = Field(default=0.30)

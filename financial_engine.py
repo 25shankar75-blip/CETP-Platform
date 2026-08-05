@@ -25,7 +25,6 @@ def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: di
     rate_elec = rates.get('dg_set', 11000) + rates.get('transformer', 1700)
     rate_phe = rates.get('phe', 1500)
     
-    # Sunk costs for existing equipment in Brownfield
     c_chill = 0.0 if is_brownfield else rate_chiller
     c_ct = 0.0 if is_brownfield else rate_ct
     c_pumps = 0.0 if is_brownfield else rate_pumps
