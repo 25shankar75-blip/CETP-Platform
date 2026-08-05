@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import json
 import gc
+import requests
 
 from schemas import CURRENCY_MULTIPLIERS
 from physics_engine import expand_24_to_8760
@@ -16,10 +17,26 @@ st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color:
 st.markdown('<p class="main-header">❄️ Cooling Energy Transition Platform (CETP)</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal Energy Storage Digital Twin</p>', unsafe_allow_html=True)
 
+# LIVE CURRENCY INTEGRATION
+@st.cache_data(ttl=3600)
+def fetch_live_currency(base_dict):
+    try:
+        url = "https://open.er-api.com/v6/latest/INR"
+        resp = requests.get(url, timeout=3).json()
+        if resp.get("result") == "success":
+            rates = resp["rates"]
+            base_dict["USD ($)"]["rate"] = rates.get("USD", base_dict["USD ($)"]["rate"])
+            base_dict["EUR (€)"]["rate"] = rates.get("EUR", base_dict["EUR (€)"]["rate"])
+            base_dict["AED (د.إ)"]["rate"] = rates.get("AED", base_dict["AED (د.إ)"]["rate"])
+            base_dict["MYR (RM)"]["rate"] = rates.get("MYR", base_dict["MYR (RM)"]["rate"])
+    except: pass
+    return base_dict
+
+CURRENCIES = fetch_live_currency(CURRENCY_MULTIPLIERS)
+
 DEFAULT_LOAD = [1047.816]*8 + [1746.36]*2 + [2095.632]*4 + [2794.176]*4 + [2444.904]*2 + [2095.632]*2 + [1397.088]*2
 DEFAULT_TARIFF = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
 
-# --- SESSION STATE INITIALIZATION (STRICT BINDING FIX) ---
 ui_keys = {
     "proj_name": "Example Pharma Project", "location": "Ujjain, MP, India", "industry": "Pharmaceuticals", "proj_type": "Greenfield Project", 
     "tank_shape": "Cylindrical", "tes_strategy": "Partial Storage", "currency": "INR (₹)", "chiller_type": "Water-Cooled", 
@@ -61,10 +78,9 @@ save_dict = {k: st.session_state[k] for k in ui_keys.keys()}
 if "df_24" in st.session_state: save_dict["df_24"] = st.session_state["df_24"].to_dict(orient="records")
 st.sidebar.download_button("💾 Save Project State", json.dumps(save_dict), file_name="cetp_project.json", mime="application/json")
 
-sym = CURRENCY_MULTIPLIERS[st.session_state.currency]["symbol"]
-mult = CURRENCY_MULTIPLIERS[st.session_state.currency]["rate"]
+sym = CURRENCIES[st.session_state.currency]["symbol"]
+mult = CURRENCIES[st.session_state.currency]["rate"]
 
-# Initialize Interactive DataFrame
 if "df_24" not in st.session_state:
     st.session_state["df_24"] = pd.DataFrame({
         "Hour": [f"{i:02d}:00" for i in range(24)], "Load (TR)": DEFAULT_LOAD,
@@ -113,8 +129,8 @@ if not st.session_state.run_sim:
             st.session_state.location = st.text_input("Location (For Weather API)", value=st.session_state.location)
             industries = ["Pharmaceuticals", "Data Centre", "Commercial HVAC", "Chemical Process", "FMCG", "Auto"]
             st.session_state.industry = st.selectbox("Industry Sector", industries, index=industries.index(st.session_state.industry))
-            currencies = list(CURRENCY_MULTIPLIERS.keys())
-            st.session_state.currency = st.selectbox("Currency Unit", currencies, index=currencies.index(st.session_state.currency))
+            currencies_list = list(CURRENCIES.keys())
+            st.session_state.currency = st.selectbox("Currency Unit", currencies_list, index=currencies_list.index(st.session_state.currency))
             st.markdown("---")
             st.session_state.use_live_weather = st.checkbox("📡 Enable Live Open-Meteo Weather API (8760 WBT)", value=st.session_state.use_live_weather)
             st.session_state.use_coolprop = st.checkbox("⚗️ Enable CoolProp Thermodynamic Fluid Analysis", value=st.session_state.use_coolprop)
@@ -298,11 +314,12 @@ else:
 
     with t7:
         st.subheader("📑 Report Dashboard & Export")
+        st.info("The exported reports now contain dynamic 24-hour visual charts and a granular equipment-by-equipment (Chillers, Pumps, Fans) kWh and OPEX matrix.")
         c1, c2 = st.columns(2)
         with c1:
-            pdf = generate_pdf_report(st.session_state.proj_name, st.session_state.location, st.session_state.industry, st.session_state.proj_type, st.session_state.currency, df_comp)
-            st.download_button("📥 Export PDF Report", data=pdf, file_name=f"CETP_Report_{st.session_state.proj_name}.pdf", mime="application/pdf", use_container_width=True)
+            pdf = generate_pdf_report(st.session_state.proj_name, st.session_state.location, st.session_state.industry, st.session_state.proj_type, st.session_state.currency, df_comp, load_arr[:24], tar_arr[:24], res, sym)
+            st.download_button("📥 Export High-Def PDF Report", data=pdf, file_name=f"CETP_Report_{st.session_state.proj_name}.pdf", mime="application/pdf", use_container_width=True)
         with c2:
-            doc = generate_word_report(st.session_state.proj_name, st.session_state.location, st.session_state.industry, st.session_state.proj_type, st.session_state.currency, df_comp)
-            if doc: st.download_button("📝 Export Word Document (.docx)", data=doc, file_name=f"CETP_Report_{st.session_state.proj_name}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
+            doc = generate_word_report(st.session_state.proj_name, st.session_state.location, st.session_state.industry, st.session_state.proj_type, st.session_state.currency, df_comp, load_arr[:24], tar_arr[:24], res, sym)
+            if doc: st.download_button("📝 Export Editable Word Document (.docx)", data=doc, file_name=f"CETP_Report_{st.session_state.proj_name}.docx", mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", use_container_width=True)
     gc.collect()

@@ -75,24 +75,30 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     opex = energy_cost + (dg_kva * prm['demand_rate'] * 12) + water_cost
     emissions_tons = (energy_kwh * prm['grid_emission']) / 1000.0
     
+    annual_breakdown = {
+        "Base Chiller": {"kwh": np.sum(pwr_comp), "cost": np.sum(pwr_comp * tariff_prof)},
+        "Brine Chiller": {"kwh": np.sum(pwr_brine), "cost": np.sum(pwr_brine * tariff_prof)},
+        "CHW Pumps": {"kwh": np.sum(pwr_chw), "cost": np.sum(pwr_chw * tariff_prof)},
+        "CW Pumps": {"kwh": np.sum(pwr_cw), "cost": np.sum(pwr_cw * tariff_prof)},
+        "CT Fans": {"kwh": np.sum(pwr_fan), "cost": np.sum(pwr_fan * tariff_prof)}
+    }
+    
     return {
         "kw_comp": pwr_comp, "kw_brine": pwr_brine, "kw_chw": pwr_chw, "kw_cw": pwr_cw, "kw_fan": pwr_fan, "total_kw": pwr_total,
         "charge": charge_tr, "discharge": discharge_tr, "dem": dem_kw, "dg_kva": dg_kva, "energy_kwh": energy_kwh, "energy_cost": energy_cost, 
-        "opex": opex, "emissions": emissions_tons, "water_kl": water_kl, "water_cost": water_cost
+        "opex": opex, "emissions": emissions_tons, "water_kl": water_kl, "water_cost": water_cost, "breakdown": annual_breakdown
     }
 
 def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
     scale = peak_tr / 2794.176
     module_size = prm.get('chiller_module_tr', 700.0)
     
-    # 1. Conventional (Uses Dynamic Input Module Rounding)
     c_working = np.ceil(peak_tr / module_size) * module_size
-    c_base = c_working + module_size # N+1 Standby
+    c_base = c_working + module_size 
     res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, charge_hrs, prm, proj_type)
     bk_c, cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", prm, res_c["dg_kva"], c_base, proj_type)
     maint_c = cap_c * prm['maintenance_pct']
     
-    # 2. PCM TES (Scaled Rev19 Logic)
     p_base = 2498.18 * scale
     p_dual = 295.99 * scale
     p_tes = 1512.10 * scale
@@ -100,7 +106,6 @@ def optimize_plant(L8760, T8760, peak_tr, charge_hrs, prm, proj_type):
     bk_p, cap_p = calculate_capex(p_base, p_dual, p_tes, "PCM TES Opt.", prm, res_p["dg_kva"], c_base, proj_type)
     maint_p = cap_p * prm['maintenance_pct']
     
-    # 3. Stratified TES (Scaled Rev19 Logic)
     s_base = 2250.0 * scale
     s_tes = 2067.87 * scale
     res_s = run_thermodynamic_simulation(L8760, T8760, s_base, 0, s_tes, charge_hrs, prm, proj_type)
