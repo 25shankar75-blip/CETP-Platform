@@ -16,7 +16,7 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     kw_brine_pmp = prm['brine_pump_kw']
     kw_base_chiller = prm['kw_tr_base']
     
-    # 1. Sort daily tariffs to isolate cheapest charge windows and peak discharge windows
+    # Sort daily tariffs to isolate cheapest charge windows and peak discharge windows
     daily_tariff = tariff_prof[:24]
     cheapest_hrs = np.argsort(daily_tariff)
     expensive_hrs = np.argsort(daily_tariff)[::-1]
@@ -78,7 +78,7 @@ def run_thermodynamic_simulation(load_prof, tariff_prof, cap_base, cap_dual, tes
     dem_kw = float(np.max(pwr_total))
     dg_kva = (dem_kw / 0.8) * 1.15 
     
-    # Exact Mondelez DG Penalty & OPEX Logic
+    # Mondelez DG Penalty & OPEX Logic
     op_days = prm.get('operating_days', 325)
     daily_pwr = pwr_total[:24]
     
@@ -122,7 +122,7 @@ def optimize_plant(L8760, T8760, installed_chiller_tr, prm, audit_prm, proj_type
     is_retro = "Brownfield" in proj_type
     
     # 1. BASELINE (AUDIT parameters for Inefficient state)
-    c_base = installed_chiller_tr 
+    c_base = installed_chiller_tr if installed_chiller_tr > 0 else max(L8760[:24]) * 1.15
     
     res_c = run_thermodynamic_simulation(L8760, T8760, c_base, 0, 0, "NONE", audit_prm, proj_type)
     bk_c, cap_c, mech_cap_c = calculate_capex(c_base, 0, 0, "Conventional N+1", audit_prm, res_c["dg_kva"], c_base, proj_type)
@@ -144,7 +144,7 @@ def optimize_plant(L8760, T8760, installed_chiller_tr, prm, audit_prm, proj_type
     
     for t_cap in tes_sizes:
         # --- PCM PERMUTATION (Add New Brine Chiller) ---
-        p_dual = t_cap / 8.0 # 8 hr charge window
+        p_dual = t_cap / 8.0 
         p_base = c_base if is_retro else max(0, installed_chiller_tr - p_dual)
             
         res_p_tmp = run_thermodynamic_simulation(L8760, T8760, p_base, p_dual, t_cap, "PCM", prm, proj_type)
