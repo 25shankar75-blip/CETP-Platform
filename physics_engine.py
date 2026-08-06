@@ -8,8 +8,8 @@ import pandas as pd
 import urllib.request
 import json
 
-def fetch_live_weather_wbt(location_str: str, lat: float = 23.1765, lon: float = 75.7885) -> dict:
-    """Fetch location WBT / DBT or fallback to robust synthetic diurnal curve."""
+def fetch_live_weather_wbt(location_str: str = "Ujjain, MP", lat: float = 23.1765, lon: float = 75.7885) -> dict:
+    """Fetch location WBT / DBT or fallback gracefully to robust synthetic diurnal curve."""
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m&forecast_days=1"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
