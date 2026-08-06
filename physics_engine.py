@@ -1,52 +1,60 @@
-import math
+import numpy as np
+import requests
 
-def get_fluid_properties(fluid_type="Water", temp_c=5.0):
-    if fluid_type == "Water":
-        return {"cp_kj_kg_k": 4.186, "density_kg_m3": 999.0}
-    elif fluid_type == "30% MEG":
-        return {"cp_kj_kg_k": 3.65, "density_kg_m3": 1045.0}
-    return {"cp_kj_kg_k": 4.186, "density_kg_m3": 1000.0}
+try:
+    import CoolProp.CoolProp as CP
+    COOLPROP_AVAILABLE = True
+except ImportError:
+    COOLPROP_AVAILABLE = False
 
-def fetch_weather_data(location):
-    base_wbt = 24.0
-    return [base_wbt + 4.0 * math.sin(2 * math.pi * h / 24) for h in range(8760)]
+PLV_LOADS = np.array([0.0, 0.25, 0.40, 0.50, 0.60, 0.70, 0.80, 0.90, 1.00])
+PLV_KW_TR = np.array([0.75, 0.70, 0.64, 0.58, 0.54, 0.51, 0.49, 0.50, 0.53])
 
-def calculate_pump_kw(m_dot_kg_s, head_m, efficiency=0.75):
-    return (9.81 * m_dot_kg_s * head_m) / (efficiency * 1000)
+def get_plv_kw_tr(load_fraction: float) -> float:
+    safe_fraction = max(0.0, min(1.0, load_fraction))
+    return float(np.interp(safe_fraction, PLV_LOADS, PLV_KW_TR))
 
-def get_chiller_plv(part_load_ratio):
-    if part_load_ratio >= 1.0: return 1.0
-    elif part_load_ratio >= 0.75: return 0.85
-    elif part_load_ratio >= 0.50: return 0.70
-    else: return 0.60 
-
-def get_dispatch_schedule(hourly_load, tariff_profile, dg_outage_hours, installed_chiller_tr, tes_type="PCM"):
-    schedule = []
-    
-    # Identify the absolute 8 lowest tariff hours for PCM charging
-    sorted_tariff_hours = sorted(range(24), key=lambda i: tariff_profile[i])
-    pcm_charge_window = sorted_tariff_hours[:8]
-    
-    # Identify Peak Tariff & DG Outage hours for discharging (highest cost first)
-    discharge_priority_hours = sorted(range(24), key=lambda i: (dg_outage_hours[i], tariff_profile[i]), reverse=True)
-
-    for hour in range(24):
-        load = hourly_load[hour]
-        tariff = tariff_profile[hour]
+def fetch_8760_wbt(location: str, design_wbt: float, enable_api: bool) -> np.ndarray:
+    if not enable_api: return generate_synthetic_wbt(design_wbt)
+    try:
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={location}&count=1&format=json"
+        geo_res = requests.get(geo_url, timeout=5).json()
+        if 'results' not in geo_res: raise ValueError("Location not found")
+        lat, lon = geo_res['results'][0]['latitude'], geo_res['results'][0]['longitude']
         
-        if tes_type == "PCM":
-            # PCM: Dedicated charge chiller runs independently during 8 lowest hours
-            is_charging = hour in pcm_charge_window
-            is_discharging = hour in discharge_priority_hours[:8] 
-            
-        elif tes_type == "Stratified":
-            # Stratified: Can ONLY charge if existing chillers have spare capacity
-            spare_capacity = installed_chiller_tr - load
-            is_charging = (tariff <= sorted_tariff_hours[12]) and (spare_capacity > 0)
-            is_discharging = hour in discharge_priority_hours[:8]
-        else:
-            is_charging, is_discharging = False, False
-            
-        schedule.append({"charge": is_charging, "discharge": is_discharging})
+        w_url = f"https://archive-api.open-meteo.com/v1/archive?latitude={lat}&longitude={lon}&start_date=2023-01-01&end_date=2023-12-31&hourly=wet_bulb_temperature_2m"
+        w_res = requests.get(w_url, timeout=10).json()
+        wbt_data = np.array(w_res['hourly']['wet_bulb_temperature_2m'], dtype=np.float32)
         
-    return schedule
+        if len(wbt_data) < 8760: raise ValueError("Incomplete data")
+        nan_mask = np.isnan(wbt_data)
+        wbt_data[nan_mask] = np.nanmean(wbt_data)
+        return wbt_data[:8760]
+    except Exception as e:
+        print(f"Weather API Failed. Falling back to synthetic. {e}")
+        return generate_synthetic_wbt(design_wbt)
+
+def generate_synthetic_wbt(design_wbt: float) -> np.ndarray:
+    hours = np.arange(8760)
+    hour_of_day = hours % 24
+    return design_wbt - 4.0 + 4.0 * np.sin(np.pi * (hour_of_day - 9) / 12)
+
+def get_fluid_cp_density(temp_c: float, is_brine: bool, use_coolprop: bool):
+    temp_k = temp_c + 273.15
+    if use_coolprop and COOLPROP_AVAILABLE:
+        try:
+            fluid = 'INCOMP::MEG-30%' if is_brine else 'Water'
+            cp = CP.PropsSI('C', 'T', temp_k, 'P', 101325, fluid) / 1000.0 
+            rho = CP.PropsSI('D', 'T', temp_k, 'P', 101325, fluid) 
+            return cp, rho
+        except: return (3.65, 1045.0) if is_brine else (4.18, 1000.0)
+    else:
+        return (3.65, 1045.0) if is_brine else (4.18, 1000.0)
+
+def calc_vfd_power(base_kw_tr: float, load_tr: float, rated_tr: float, min_speed: float = 0.35) -> float:
+    if rated_tr <= 0 or load_tr <= 0: return 0.0
+    flow_ratio = max(min_speed, min(1.0, load_tr / rated_tr))
+    return (rated_tr * base_kw_tr) * (flow_ratio ** 3)
+
+def expand_24_to_8760(day1_profile: list) -> np.ndarray:
+    return np.tile(np.array(day1_profile, dtype=np.float32), 365)
