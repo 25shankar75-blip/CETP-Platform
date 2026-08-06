@@ -1,70 +1,47 @@
-# financial_engine.py
-from typing import Dict, Tuple
-from schemas import CURRENCY_MULTIPLIERS
+def get_currency_multiplier(currency):
+    rates = {
+        "INR (₹)": 1.0, 
+        "USD ($)": 0.012, 
+        "EUR (€)": 0.011, 
+        "AED (د.إ)": 0.044, 
+        "MYR (RM)": 0.057
+    }
+    return rates.get(currency, 1.0)
 
-def format_currency(amount_inr: float, currency_key: str) -> str:
-    cfg = CURRENCY_MULTIPLIERS.get(currency_key, CURRENCY_MULTIPLIERS["INR (₹)"])
-    converted = amount_inr * cfg["rate"]
-    sym = cfg["symbol"]
-    if currency_key == "INR (₹)":
-        if abs(converted) >= 10000000: return f"{sym} {converted / 10000000:.2f} Cr"
-        elif abs(converted) >= 100000: return f"{sym} {converted / 100000:.2f} Lakhs"
-        else: return f"{sym} {converted:,.0f}"
-    else: return f"{sym} {converted:,.0f}"
+def calculate_conventional_capex(installed_tr):
+    return installed_tr * 45000 
 
-def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: dict, dg_kva: float, base_inst: float, proj_type: str) -> Tuple[Dict[str, float], float, float]:
-    is_brownfield = "Brownfield" in proj_type
-    rates = prm.get('unit_rates', {})
-    
-    rate_chiller = rates.get('water_cooled_chiller', 19000) if "Water" in prm.get('chiller_type', 'Water') else rates.get('air_cooled_chiller', 21000)
-    rate_brine = rates.get('brine_chiller', 23000)
-    rate_ct = rates.get('cooling_tower', 3200)
-    rate_pumps = rates.get('chw_pump', 900) + rates.get('cdw_pump', 650)
-    rate_pcm = rates.get('pcm_cylindrical', 7800) if "Cylindrical" in prm.get('tank_shape', '') else rates.get('pcm_rectangular', 8500)
-    rate_strat = rates.get('strat_tes', 18000)
-    rate_elec = rates.get('dg_set', 11000) + rates.get('transformer', 1700)
-    rate_phe = rates.get('phe', 1500)
-    
-    # Sunk costs for existing equipment in Brownfield
-    c_chill = 0.0 if is_brownfield else rate_chiller
-    c_ct = 0.0 if is_brownfield else rate_ct
-    c_pumps = 0.0 if is_brownfield else rate_pumps
-    c_elec = 0.0 if is_brownfield else rate_elec
-    
-    bkup = {}
-    if mode == "Conventional N+1":
-        bkup['Base Chillers'] = base_inst * c_chill
-        bkup['Dual/Brine Chillers'] = 0.0
-        bkup['Towers & Pumps'] = base_inst * (c_ct + c_pumps)
-        bkup['Storage Tank & Media'] = 0.0
-        bkup['Electrical Infra & DG'] = dg_kva * c_elec
-        
-        sub_mech = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG']
-        sub_tank = 0.0
-        
-    elif mode == "PCM TES Opt.":
-        bkup['Base Chillers'] = b_cap * c_chill
-        bkup['Dual/Brine Chillers'] = d_cap * rate_brine
-        bkup['Towers & Pumps'] = (b_cap * (c_ct + c_pumps)) + (d_cap * (rate_ct + rate_pumps))
-        bkup['Storage Tank & Media'] = t_cap * rate_pcm
-        bkup['Electrical Infra & DG'] = dg_kva * c_elec
-        
-        sub_mech = bkup['Base Chillers'] + bkup['Dual/Brine Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
-        sub_tank = bkup['Storage Tank & Media']
-        
-    else: 
-        bkup['Base Chillers'] = b_cap * c_chill
-        bkup['Dual/Brine Chillers'] = 0.0
-        bkup['Towers & Pumps'] = b_cap * (c_ct + c_pumps)
-        bkup['Storage Tank & Media'] = t_cap * rate_strat
-        bkup['Electrical Infra & DG'] = dg_kva * c_elec
-        
-        sub_mech = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
-        sub_tank = bkup['Storage Tank & Media']
+def calculate_pcm_capex(trh, charge_chiller_tr):
+    tank_capex = trh * 5500 
+    chiller_capex = charge_chiller_tr * 65000 
+    return tank_capex + chiller_capex
 
-    bkup['Indirects & Integration (30%)'] = (sub_mech + sub_tank) * prm.get('indirects_pct', 0.30)
-    
-    total_capex = sum(bkup.values())
-    mech_capex = sub_mech * (1.0 + prm.get('indirects_pct', 0.30)) # Mechanical share for Maintenance (AMC) calculation
-    
-    return bkup, total_capex, mech_capex
+def calculate_stratified_capex(trh):
+    return trh * 3500 
+
+def apply_amc_and_indirects(mechanical_capex, static_tank_capex):
+    mech_amc = mechanical_capex * 0.05
+    tank_amc = static_tank_capex * 0.00
+    indirects = (mechanical_capex + static_tank_capex) * 0.30
+    return mech_amc + tank_amc, indirects
+
+def simulate_opex(daily_load, tariff, dg_outage, tes_schedule, base_kw_tr=0.65):
+    total_daily_opex = 0
+    for h in range(24):
+        # DG out-prices grid tariff if active
+        cost_per_kwh = dg_outage[h] if dg_outage[h] > 0 else tariff[h]
+        load = daily_load[h]
+        
+        if tes_schedule[h]['discharge']:
+            # Pumping power only (Chillers are off or ramped down)
+            kw = load * base_kw_tr * 0.1 
+        elif tes_schedule[h]['charge']:
+            # Base load + charging penalty
+            kw = load * base_kw_tr * 1.2 
+        else:
+            # Standard operation
+            kw = load * base_kw_tr
+            
+        total_daily_opex += kw * cost_per_kwh
+        
+    return total_daily_opex * 365
