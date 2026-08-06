@@ -12,7 +12,7 @@ def format_currency(amount_inr: float, currency_key: str) -> str:
         else: return f"{sym} {converted:,.0f}"
     else: return f"{sym} {converted:,.0f}"
 
-def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: dict, dg_kva: float, base_inst: float, proj_type: str) -> Tuple[Dict[str, float], float]:
+def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: dict, dg_kva: float, base_inst: float, proj_type: str) -> Tuple[Dict[str, float], float, float]:
     is_brownfield = "Brownfield" in proj_type
     rates = prm.get('unit_rates', {})
     
@@ -25,6 +25,7 @@ def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: di
     rate_elec = rates.get('dg_set', 11000) + rates.get('transformer', 1700)
     rate_phe = rates.get('phe', 1500)
     
+    # Sunk costs for existing equipment in Brownfield
     c_chill = 0.0 if is_brownfield else rate_chiller
     c_ct = 0.0 if is_brownfield else rate_ct
     c_pumps = 0.0 if is_brownfield else rate_pumps
@@ -37,23 +38,33 @@ def calculate_capex(b_cap: float, d_cap: float, t_cap: float, mode: str, prm: di
         bkup['Towers & Pumps'] = base_inst * (c_ct + c_pumps)
         bkup['Storage Tank & Media'] = 0.0
         bkup['Electrical Infra & DG'] = dg_kva * c_elec
-        sub_eq = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG']
-        bkup['Indirects & Integration (30%)'] = sub_eq * prm.get('indirects_pct', 0.30)
+        
+        sub_mech = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG']
+        sub_tank = 0.0
+        
     elif mode == "PCM TES Opt.":
         bkup['Base Chillers'] = b_cap * c_chill
         bkup['Dual/Brine Chillers'] = d_cap * rate_brine
         bkup['Towers & Pumps'] = (b_cap * (c_ct + c_pumps)) + (d_cap * (rate_ct + rate_pumps))
         bkup['Storage Tank & Media'] = t_cap * rate_pcm
         bkup['Electrical Infra & DG'] = dg_kva * c_elec
-        sub_eq = bkup['Base Chillers'] + bkup['Dual/Brine Chillers'] + bkup['Towers & Pumps'] + bkup['Storage Tank & Media'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
-        bkup['Indirects & Integration (30%)'] = sub_eq * prm.get('indirects_pct', 0.30)
+        
+        sub_mech = bkup['Base Chillers'] + bkup['Dual/Brine Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
+        sub_tank = bkup['Storage Tank & Media']
+        
     else: 
         bkup['Base Chillers'] = b_cap * c_chill
         bkup['Dual/Brine Chillers'] = 0.0
         bkup['Towers & Pumps'] = b_cap * (c_ct + c_pumps)
         bkup['Storage Tank & Media'] = t_cap * rate_strat
         bkup['Electrical Infra & DG'] = dg_kva * c_elec
-        sub_eq = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Storage Tank & Media'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
-        bkup['Indirects & Integration (30%)'] = sub_eq * prm.get('indirects_pct', 0.30)
         
-    return bkup, sum(bkup.values())
+        sub_mech = bkup['Base Chillers'] + bkup['Towers & Pumps'] + bkup['Electrical Infra & DG'] + (t_cap * rate_phe)
+        sub_tank = bkup['Storage Tank & Media']
+
+    bkup['Indirects & Integration (30%)'] = (sub_mech + sub_tank) * prm.get('indirects_pct', 0.30)
+    
+    total_capex = sum(bkup.values())
+    mech_capex = sub_mech * (1.0 + prm.get('indirects_pct', 0.30)) # Mechanical share for Maintenance (AMC) calculation
+    
+    return bkup, total_capex, mech_capex
