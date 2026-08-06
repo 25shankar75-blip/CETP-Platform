@@ -30,7 +30,7 @@ def generate_pdf_report(project_name: str, currency: str, results: dict) -> byte
         b_res = results.get("baseline", {})
         
         data = [
-            ["Metric", "Conventional / Existing", "PCM TES Optimum", "Stratified TES Optimum"],
+            ["Metric", "Conventional / Existing Baseline", "PCM TES Optimum", "Stratified TES Optimum"],
             ["TES Capacity (TRh)", "0 TRh", f"{p_res.get('tes_trh', 0):.0f} TRh", f"{s_res.get('tes_trh', 0):.0f} TRh"],
             ["Turnkey CAPEX (₹ Cr)", f"{b_res.get('capex', 0)/1e7:.2f}", f"{p_res.get('capex', 0)/1e7:.2f}", f"{s_res.get('capex', 0)/1e7:.2f}"],
             ["Annual OPEX (₹ Cr/yr)", f"{b_res.get('opex', 0)/1e7:.2f}", f"{p_res.get('opex', 0)/1e7:.2f}", f"{s_res.get('opex', 0)/1e7:.2f}"],
@@ -71,7 +71,7 @@ def generate_word_report(project_name: str, currency: str, results: dict) -> byt
         table = doc.add_table(rows=1, cols=4)
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Metric'
-        hdr_cells[1].text = 'Conventional / Existing'
+        hdr_cells[1].text = 'Conventional / Existing Baseline'
         hdr_cells[2].text = 'PCM TES Optimum'
         hdr_cells[3].text = 'Stratified TES Optimum'
         

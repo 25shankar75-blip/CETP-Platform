@@ -1,5 +1,5 @@
 """
-Cooling Energy Transition Platform (CETP) - ASHRAE Thermodynamics, API Weather & Dispatch Engine
+Cooling Energy Transition Platform (CETP) - ASHRAE Thermodynamics, Live Weather & Dispatch Engine
 File: physics_engine.py
 """
 
@@ -8,8 +8,12 @@ import pandas as pd
 import urllib.request
 import json
 
+def expand_24_to_8760(arr_24: np.ndarray) -> np.ndarray:
+    """Extrapolates 24-hour diurnal profile across 8,760 annual operating hours."""
+    return np.tile(arr_24, 365)
+
 def fetch_live_weather_wbt(location_str: str = "Ujjain, MP", lat: float = 23.1765, lon: float = 75.7885) -> dict:
-    """Fetch location WBT / DBT via Open-Meteo API or fallback gracefully to synthetic diurnal curve."""
+    """Fetches real-time/historical hourly WBT and DBT via Open-Meteo API with fallback."""
     try:
         url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m&forecast_days=1"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -17,7 +21,6 @@ def fetch_live_weather_wbt(location_str: str = "Ujjain, MP", lat: float = 23.176
             data = json.loads(response.read().decode())
             dbt = data["hourly"]["temperature_2m"][:24]
             rh = data["hourly"]["relative_humidity_2m"][:24]
-            # Stull equation approximation for Wet Bulb Temp (WBT)
             wbt = [
                 d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035
                 for d, r in zip(dbt, rh)
@@ -30,19 +33,24 @@ def fetch_live_weather_wbt(location_str: str = "Ujjain, MP", lat: float = 23.176
         return {"dbt": dbt_synthetic, "wbt": wbt_synthetic, "status": "SYNTHETIC_FALLBACK"}
 
 def calc_operating_tr(flow_m3h: float, dt_c: float, fluid_type: str = "water") -> float:
+    """Auto-calculates operating TR: m * Cp * Delta_T."""
+    if flow_m3h <= 0 or dt_c <= 0:
+        return 0.0
     rho = 1000.0 if fluid_type == "water" else 1035.0
     cp = 4.186 if fluid_type == "water" else 3.65  # kJ/kg.K
     m_dot_kgs = (flow_m3h * rho) / 3600.0
     kw_thermal = m_dot_kgs * cp * dt_c
-    return max(0.0, kw_thermal / 3.51685)
+    return kw_thermal / 3.51685
 
 def calc_hydraulic_pump_kw(flow_m3h: float, head_m: float, pump_eff: float = 0.75) -> float:
+    """Calculates hydraulic pump power from flow (m3/h) and head (m)."""
     if flow_m3h <= 0 or head_m <= 0:
         return 0.0
     m_dot_kgs = (flow_m3h * 1000.0) / 3600.0
     return (9.81 * m_dot_kgs * head_m) / (pump_eff * 1000.0)
 
 def get_chiller_kw_per_tr(load_factor: float, base_kw_tr: float = 0.62, is_air_cooled: bool = False, is_night: bool = False) -> float:
+    """Dynamic Chiller Part-Load Value (PLV) degradation curve with night condenser relief."""
     if load_factor <= 0.0:
         return 0.0
     if load_factor < 0.3:
@@ -59,11 +67,12 @@ def get_chiller_kw_per_tr(load_factor: float, base_kw_tr: float = 0.62, is_air_c
     return base_kw_tr * plv_mult * type_mult * night_mult
 
 def simulate_24h_plant(df_24h: pd.DataFrame, scope: str, audit_config: dict, fleet_df: pd.DataFrame):
+    """Simulates Baseline Plant operation (Retrofit Audited Inefficient vs Greenfield Proposed N+1)."""
     hours = df_24h["Hour"].values
     loads = df_24h["Cooling Load (TR)"].values
     tariffs = df_24h["Tariff (₹/kWh)"].values
     
-    total_fleet_tr = sum(fleet_df["Capacity (TR)"] * fleet_df["Quantity"]) if not fleet_df.empty else 3000.0
+    total_fleet_tr = sum(fleet_df["Capacity (TR)"] * fleet_df["Quantity"]) if not fleet_df.empty else max(loads) * 1.25
     is_any_ac = any("Air-Cooled" in str(t) for t in fleet_df["Chiller Type"]) if not fleet_df.empty else False
 
     op_tr, charge_tr, discharge_tr = [], [], []
@@ -71,12 +80,12 @@ def simulate_24h_plant(df_24h: pd.DataFrame, scope: str, audit_config: dict, fle
     lf_list = []
 
     if scope == "Brownfield (Retrofit)":
-        dt_actual = audit_config.get("running_chw_return_c", 12.0) - audit_config.get("running_chw_supply_c", 8.0)
+        dt_actual = max(1.0, audit_config.get("running_chw_return_c", 12.0) - audit_config.get("running_chw_supply_c", 8.0))
         tr_measured = calc_operating_tr(audit_config.get("running_chw_flow_m3h", 500.0), dt_actual)
         
-        chw_pri = calc_hydraulic_pump_kw(audit_config.get("running_chw_flow_m3h", 500), audit_config.get("chw_pump_head_m", 30))
+        chw_pri = calc_hydraulic_pump_kw(audit_config.get("running_chw_flow_m3h", 500.0), audit_config.get("chw_pump_head_m", 30.0))
         chw_sec = chw_pri * 0.4
-        cw_p = 0.0 if is_any_ac else calc_hydraulic_pump_kw(audit_config.get("running_cw_flow_m3h", 600), audit_config.get("cw_pump_head_m", 25))
+        cw_p = 0.0 if is_any_ac else calc_hydraulic_pump_kw(audit_config.get("running_cw_flow_m3h", 600.0), audit_config.get("cw_pump_head_m", 25.0))
         ct_f = 0.0 if is_any_ac else audit_config.get("ct_fan_power_kw", 45.0)
         
         tot_aux_kw = chw_pri + chw_sec + cw_p + ct_f
@@ -108,7 +117,7 @@ def simulate_24h_plant(df_24h: pd.DataFrame, scope: str, audit_config: dict, fle
             
             flow_r = max(0.4, load / max(1.0, total_fleet_tr))
             chw_pri_kw.append(25.0 * flow_r)
-            chw_sec_kw.append(15.0 * (flow_r ** 3))
+            chw_sec_kw.append(15.0 * (flow_r ** 3)) # VFD Affinity Law
             cw_pump_kw.append(0.0 if is_any_ac else 30.0 * (flow_r ** 3))
             ct_fan_kw.append(0.0 if is_any_ac else 20.0 * flow_r)
 
@@ -132,11 +141,11 @@ def simulate_24h_plant(df_24h: pd.DataFrame, scope: str, audit_config: dict, fle
     }
 
 def simulate_pcm_tes_24h(df_24h: pd.DataFrame, tes_capacity_trh: float, charge_chiller_tr: float, fleet_installed_tr: float):
+    """Simulates Dedicated PCM Brine Charge Chiller Dispatch over lowest 8-hour tariff block."""
     hours = df_24h["Hour"].values
     loads = df_24h["Cooling Load (TR)"].values
     tariffs = df_24h["Tariff (₹/kWh)"].values
     
-    # 1. Continuous 8-hour lowest tariff block
     rolling_8h = [np.sum([tariffs[(i+j)%24] for j in range(8)]) for i in range(24)]
     best_start = np.argmin(rolling_8h)
     charge_hours = [(best_start + j) % 24 for j in range(8)]
@@ -158,7 +167,7 @@ def simulate_pcm_tes_24h(df_24h: pd.DataFrame, tes_capacity_trh: float, charge_c
         
         if is_charge:
             c_val = charge_chiller_tr
-            c_k = charge_chiller_tr * 0.82
+            c_k = charge_chiller_tr * 0.82 # Dedicated Brine Chiller running at sub-zero
             storage_state = min(tes_capacity_trh, storage_state + c_val)
             lf = load / max(1.0, fleet_installed_tr)
             b_k = load * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_night=(h >= 22 or h <= 6))
@@ -212,6 +221,7 @@ def simulate_pcm_tes_24h(df_24h: pd.DataFrame, tes_capacity_trh: float, charge_c
     }
 
 def simulate_stratified_tes_24h(df_24h: pd.DataFrame, tes_capacity_trh: float, fleet_installed_tr: float):
+    """Simulates Stratified TES bounded by available spare chiller capacity (Available_TR = Fleet - Load)."""
     hours = df_24h["Hour"].values
     loads = df_24h["Cooling Load (TR)"].values
     tariffs = df_24h["Tariff (₹/kWh)"].values

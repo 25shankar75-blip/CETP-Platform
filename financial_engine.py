@@ -1,21 +1,16 @@
 """
-Cooling Energy Transition Platform (CETP) - Dynamic Multi-Currency & Granular SITC Engine
+Cooling Energy Transition Platform (CETP) - Multi-Currency & Financial Engine
 File: financial_engine.py
 """
 
 import urllib.request
 import json
+from schemas import CURRENCY_MULTIPLIERS
 
-CURRENCY_RATES_DEFAULT = {
-    "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores"},
-    "USD ($)": {"rate": 0.012, "symbol": "$", "unit": "M"},
-    "EUR (€)": {"rate": 0.011, "symbol": "€", "unit": "M"},
-    "AED (د.إ)": {"rate": 0.044, "symbol": "AED", "unit": "M"},
-    "MYR (RM)": {"rate": 0.053, "symbol": "RM", "unit": "M"}
-}
+CURRENCY_RATES_DEFAULT = CURRENCY_MULTIPLIERS
 
 def fetch_live_currency_rates() -> dict:
-    """Fetch live exchange rates from Open Exchange Rates API or fallback gracefully."""
+    """Fetch live exchange rates from Open Exchange Rates API with fallback."""
     try:
         url = "https://open.er-api.com/v6/latest/INR"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -23,11 +18,11 @@ def fetch_live_currency_rates() -> dict:
             data = json.loads(response.read().decode())
             r = data["rates"]
             return {
-                "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores"},
-                "USD ($)": {"rate": r.get("USD", 0.012), "symbol": "$", "unit": "M"},
-                "EUR (€)": {"rate": r.get("EUR", 0.011), "symbol": "€", "unit": "M"},
-                "AED (د.إ)": {"rate": r.get("AED", 0.044), "symbol": "AED", "unit": "M"},
-                "MYR (RM)": {"rate": r.get("MYR", 0.053), "symbol": "RM", "unit": "M"}
+                "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores", "div": 1e7},
+                "USD ($)": {"rate": r.get("USD", 0.012), "symbol": "$", "unit": "M", "div": 1e6},
+                "EUR (€)": {"rate": r.get("EUR", 0.011), "symbol": "€", "unit": "M", "div": 1e6},
+                "AED (د.إ)": {"rate": r.get("AED", 0.044), "symbol": "AED", "unit": "M", "div": 1e6},
+                "MYR (RM)": {"rate": r.get("MYR", 0.053), "symbol": "RM", "unit": "M", "div": 1e6}
             }
     except Exception:
         return CURRENCY_RATES_DEFAULT
@@ -37,17 +32,14 @@ def format_currency(val_inr: float, currency_str: str, live_rates: dict = None) 
     c_info = rates.get(currency_str, CURRENCY_RATES_DEFAULT["INR (₹)"])
     rate = c_info["rate"]
     symbol = c_info["symbol"]
+    unit = c_info.get("unit", "Crores")
+    div = c_info.get("div", 1e7)
     
-    val_converted = val_inr * rate
-    
-    if currency_str == "INR (₹)":
-        val_cr = val_converted / 1e7
-        return f"{symbol} {val_cr:.2f} Cr"
-    else:
-        val_m = val_converted / 1e6
-        return f"{symbol} {val_m:.2f} M"
+    val_converted = (val_inr * rate) / div
+    return f"{symbol} {val_converted:.2f} {unit}"
 
 def calc_capex_breakup(scope: str, option_type: str, peak_tr: float, tes_trh: float, charge_chiller_tr: float, rates: dict):
+    """Calculates Turnkey CAPEX line-item breakdown. Sets Baseline Mechanical CAPEX = ₹0.00 for Retrofits."""
     if scope == "Brownfield (Retrofit)" and option_type == "Conventional":
         return {
             "chiller_capex": 0.0,
@@ -125,3 +117,8 @@ def calc_payback_and_roi(capex_delta: float, opex_savings_annual: float):
     payback_years = capex_delta / opex_savings_annual
     roi_pct = (opex_savings_annual / max(1.0, capex_delta)) * 100.0
     return payback_years, roi_pct
+
+def eval_payback(capex_delta: float, opex_savings_annual: float):
+    """Wrapper for payback evaluation."""
+    pb, _ = calc_payback_and_roi(capex_delta, opex_savings_annual)
+    return pb

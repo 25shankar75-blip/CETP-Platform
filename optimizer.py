@@ -9,6 +9,7 @@ from physics_engine import simulate_24h_plant, simulate_pcm_tes_24h, simulate_st
 from financial_engine import calc_capex_breakup, calc_payback_and_roi
 
 def optimize_tes_plant(df_24h: pd.DataFrame, scope: str, peak_tr: float, audit_config: dict, rates: dict, fleet_df: pd.DataFrame):
+    """Iteratively searches storage capacities to maximize annual OPEX savings targeting an optimal payback near 2 years (< 4 yrs hard filter)."""
     base_sim = simulate_24h_plant(df_24h, scope, audit_config, fleet_df=fleet_df)
     base_capex = calc_capex_breakup(scope, "Conventional", peak_tr, 0, 0, rates)["total_capex"]
     base_opex = base_sim["annual_opex"]
@@ -16,11 +17,12 @@ def optimize_tes_plant(df_24h: pd.DataFrame, scope: str, peak_tr: float, audit_c
     max_search_trh = min(25000.0, peak_tr * 12.0)
     test_capacities = np.linspace(500.0, max_search_trh, 25)
     
+    # 1. PCM TES Optimization Search
     best_pcm = None
     best_pcm_savings = -1e9
     
     for tes_trh in test_capacities:
-        charge_chiller_tr = tes_trh / 8.0
+        charge_chiller_tr = tes_trh / 8.0 # 8-Hour continuous charging window
         
         sim_pcm = simulate_pcm_tes_24h(df_24h, tes_trh, charge_chiller_tr, fleet_installed_tr=peak_tr)
         pcm_capex = calc_capex_breakup(scope, "PCM TES", peak_tr, tes_trh, charge_chiller_tr, rates)["total_capex"]
@@ -64,6 +66,7 @@ def optimize_tes_plant(df_24h: pd.DataFrame, scope: str, peak_tr: float, audit_c
             "num_tanks": 1
         }
 
+    # 2. Stratified TES Optimization Search
     best_strat = None
     best_strat_savings = -1e9
     

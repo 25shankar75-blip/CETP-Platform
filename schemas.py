@@ -7,6 +7,14 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
 
+CURRENCY_MULTIPLIERS = {
+    "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores", "div": 1e7},
+    "USD ($)": {"rate": 0.012, "symbol": "$", "unit": "M", "div": 1e6},
+    "EUR (€)": {"rate": 0.011, "symbol": "€", "unit": "M", "div": 1e6},
+    "AED (د.إ)": {"rate": 0.044, "symbol": "AED", "unit": "M", "div": 1e6},
+    "MYR (RM)": {"rate": 0.053, "symbol": "RM", "unit": "M", "div": 1e6}
+}
+
 class ScopeEnum(str, Enum):
     GREENFIELD = "Greenfield"
     BROWNFIELD = "Brownfield (Retrofit)"
@@ -55,6 +63,10 @@ class ThermoConfig(BaseModel):
     brine_return_temp: float = -2.1
     phe_pinch_deg_c: float = 1.5
     fom_efficiency: float = 0.90
+    water_cp: float = 4.186       # kJ/kg.K
+    brine_cp: float = 3.65        # 30% MEG Brine
+    water_rho: float = 1000.0     # kg/m3
+    brine_rho: float = 1035.0
 
 class AuditConfig(BaseModel):
     running_chw_supply_c: float = 8.0
