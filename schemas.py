@@ -1,5 +1,5 @@
 """
-CETP Digital Twin - Pydantic Data Schemas
+Cooling Energy Transition Platform (CETP) - Data Contracts & Schemas
 File: schemas.py
 """
 
@@ -29,7 +29,9 @@ class ChillerTypeEnum(str, Enum):
     WC_CENTRIFUGAL = "Water-Cooled Centrifugal"
     WC_VFD_SCREW = "Water-Cooled VFD Screw"
     AC_VFD = "Air-Cooled VFD"
+    AC_SCROLL = "Air-Cooled Scroll"
     BRINE_GLYCOL = "Sub-Zero Brine Chiller"
+    DUAL_MODE = "Dual-Mode Chiller"
 
 class ChillerSpec(BaseModel):
     capacity_tr: float = Field(..., gt=0)
@@ -39,6 +41,8 @@ class ChillerSpec(BaseModel):
 class ProjectConfig(BaseModel):
     project_name: str = "Mondelez 3017 TRh Retrofit"
     location: str = "Ujjain, MP"
+    latitude: float = 23.1765
+    longitude: float = 75.7885
     sector: SectorEnum = SectorEnum.FMCG
     scope: ScopeEnum = ScopeEnum.BROWNFIELD
     currency: CurrencyEnum = CurrencyEnum.INR
@@ -59,16 +63,23 @@ class AuditConfig(BaseModel):
     running_cw_supply_c: float = 32.0
     running_cw_return_c: float = 37.0
     running_cw_flow_m3h: float = 600.0
+    running_brine_supply_c: float = -5.5
+    running_brine_return_c: float = -2.1
     chw_pump_head_m: float = 30.0
     cw_pump_head_m: float = 25.0
+    ct_pump_head_m: float = 20.0
     ct_fan_power_kw: float = 45.0
-    actual_kw_per_tr: float = 0.91
+    pump_eff: float = 0.75
 
 class FinancialConfig(BaseModel):
     base_chiller_rate_per_tr: float = 22000.0
+    ac_chiller_rate_per_tr: float = 24000.0
     brine_chiller_rate_per_tr: float = 25000.0
     pcm_tes_rate_per_trh: float = 7800.0
     stratified_tes_rate_per_trh: float = 18000.0
+    chw_pump_rate_per_kw: float = 8500.0
+    cw_pump_rate_per_kw: float = 8000.0
+    ct_fan_rate_per_kw: float = 12000.0
     dg_set_rate_per_kva: float = 12500.0
     electricity_tariff_avg: float = 6.11
     dg_diesel_cost_per_kwh: float = 24.50

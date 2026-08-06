@@ -1,9 +1,12 @@
 """
-CETP Digital Twin - Multi-Currency Financial Engine
+Cooling Energy Transition Platform (CETP) - Dynamic Multi-Currency & Granular SITC Engine
 File: financial_engine.py
 """
 
-CURRENCY_RATES = {
+import urllib.request
+import json
+
+CURRENCY_RATES_DEFAULT = {
     "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores"},
     "USD ($)": {"rate": 0.012, "symbol": "$", "unit": "M"},
     "EUR (€)": {"rate": 0.011, "symbol": "€", "unit": "M"},
@@ -11,8 +14,27 @@ CURRENCY_RATES = {
     "MYR (RM)": {"rate": 0.053, "symbol": "RM", "unit": "M"}
 }
 
-def format_currency(val_inr: float, currency_str: str) -> str:
-    c_info = CURRENCY_RATES.get(currency_str, CURRENCY_RATES["INR (₹)"])
+def fetch_live_currency_rates() -> dict:
+    """Fetch live exchange rates from Open Exchange Rates API or fallback gracefully."""
+    try:
+        url = "https://open.er-api.com/v6/latest/INR"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode())
+            r = data["rates"]
+            return {
+                "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores"},
+                "USD ($)": {"rate": r.get("USD", 0.012), "symbol": "$", "unit": "M"},
+                "EUR (€)": {"rate": r.get("EUR", 0.011), "symbol": "€", "unit": "M"},
+                "AED (د.إ)": {"rate": r.get("AED", 0.044), "symbol": "AED", "unit": "M"},
+                "MYR (RM)": {"rate": r.get("MYR", 0.053), "symbol": "RM", "unit": "M"}
+            }
+    except Exception:
+        return CURRENCY_RATES_DEFAULT
+
+def format_currency(val_inr: float, currency_str: str, live_rates: dict = None) -> str:
+    rates = live_rates if live_rates else CURRENCY_RATES_DEFAULT
+    c_info = rates.get(currency_str, CURRENCY_RATES_DEFAULT["INR (₹)"])
     rate = c_info["rate"]
     symbol = c_info["symbol"]
     
@@ -33,6 +55,7 @@ def calc_capex_breakup(scope: str, option_type: str, peak_tr: float, tes_trh: fl
             "tank_capex": 0.0,
             "medium_capex": 0.0,
             "phe_capex": 0.0,
+            "pumps_ct_capex": 0.0,
             "electrical_capex": 0.0,
             "indirects": 0.0,
             "total_capex": 0.0
@@ -46,7 +69,8 @@ def calc_capex_breakup(scope: str, option_type: str, peak_tr: float, tes_trh: fl
     if option_type == "Conventional":
         installed_tr = peak_tr * 1.25
         chiller_capex = installed_tr * base_rate
-        total_mep = chiller_capex * 1.2
+        pumps_ct = installed_tr * 3500.0
+        total_mep = chiller_capex + pumps_ct
         indirects = total_mep * rates.get("indirects_pct", 0.30)
         return {
             "chiller_capex": chiller_capex,
@@ -54,17 +78,18 @@ def calc_capex_breakup(scope: str, option_type: str, peak_tr: float, tes_trh: fl
             "tank_capex": 0.0,
             "medium_capex": 0.0,
             "phe_capex": 0.0,
-            "electrical_capex": chiller_capex * 0.15,
+            "pumps_ct_capex": pumps_ct,
+            "electrical_capex": total_mep * 0.15,
             "indirects": indirects,
-            "total_capex": total_mep + indirects + (chiller_capex * 0.15)
+            "total_capex": total_mep + indirects + (total_mep * 0.15)
         }
     elif option_type == "PCM TES":
         brine_chiller_capex = charge_chiller_tr * brine_rate
         tank_struct_capex = tes_trh * 2700.0
         pcm_medium_capex = tes_trh * 4800.0
         phe_capex = charge_chiller_tr * 1200.0
-        mep_skids = (brine_chiller_capex + tank_struct_capex + pcm_medium_capex) * 0.12
-        subtotal = brine_chiller_capex + tank_struct_capex + pcm_medium_capex + phe_capex + mep_skids
+        pumps_ct = charge_chiller_tr * 2500.0
+        subtotal = brine_chiller_capex + tank_struct_capex + pcm_medium_capex + phe_capex + pumps_ct
         indirects = subtotal * rates.get("indirects_pct", 0.30)
         return {
             "chiller_capex": 0.0,
@@ -72,21 +97,23 @@ def calc_capex_breakup(scope: str, option_type: str, peak_tr: float, tes_trh: fl
             "tank_capex": tank_struct_capex,
             "medium_capex": pcm_medium_capex,
             "phe_capex": phe_capex,
+            "pumps_ct_capex": pumps_ct,
             "electrical_capex": brine_chiller_capex * 0.15,
             "indirects": indirects,
             "total_capex": subtotal + indirects
         }
     else:
         strat_tank_capex = tes_trh * strat_rate
-        mep_skids = strat_tank_capex * 0.15
-        subtotal = strat_tank_capex + mep_skids
+        pumps_ct = (tes_trh / 8.0) * 2200.0
+        subtotal = strat_tank_capex + pumps_ct
         indirects = subtotal * rates.get("indirects_pct", 0.30)
         return {
             "chiller_capex": 0.0,
             "brine_chiller_capex": 0.0,
-            "tank_capex": strat_tank_capex * 0.60,
+            "tank_capex": strat_tank_capex * 0.65,
             "medium_capex": strat_tank_capex * 0.05,
             "phe_capex": strat_tank_capex * 0.10,
+            "pumps_ct_capex": pumps_ct,
             "electrical_capex": strat_tank_capex * 0.10,
             "indirects": indirects,
             "total_capex": subtotal + indirects
