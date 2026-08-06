@@ -17,4 +17,7 @@ class ProjectConfig(BaseModel):
     
     @property
     def total_installed_tr(self) -> float:
+        # Dynamically calculates total plant TR based on fleet array
         return sum([unit.capacity_tr * unit.quantity for unit in self.chiller_fleet])
+
+# (ThermoConfig, AuditConfig, FinancialConfig remain completely unchanged below this)
