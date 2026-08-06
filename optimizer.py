@@ -1,62 +1,120 @@
 """
-CETP Digital Twin - Iterative Plant Optimizer
+Cooling Energy Transition Platform (CETP) - Iterative OPEX Maximizer
 File: optimizer.py
 """
+
 import numpy as np
 import pandas as pd
-from physics_engine import simulate_conventional, simulate_pcm, simulate_stratified
-from financial_engine import build_capex_breakdown, eval_payback
+from physics_engine import simulate_24h_plant, simulate_pcm_tes_24h, simulate_stratified_tes_24h
+from financial_engine import calc_capex_breakup, calc_payback_and_roi
 
-def optimize_plant(df_comp, load_arr, tar_arr, proj_scope, rates):
-    fleet_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
+def optimize_tes_plant(df_24h: pd.DataFrame, scope: str, peak_tr: float, audit_config: dict, rates: dict, fleet_df: pd.DataFrame):
+    base_sim = simulate_24h_plant(df_24h, scope, audit_config, fleet_df=fleet_df)
+    base_capex = calc_capex_breakup(scope, "Conventional", peak_tr, 0, 0, rates)["total_capex"]
+    base_opex = base_sim["annual_opex"]
     
-    # 1. Evaluate Baseline
-    sim_conv = simulate_conventional(load_arr, tar_arr, fleet_tr)
-    cap_conv = build_capex_breakdown("Conventional", proj_scope, fleet_tr, 0, 0, rates)
+    max_search_trh = min(25000.0, peak_tr * 12.0)
+    test_capacities = np.linspace(500.0, max_search_trh, 25)
     
-    # 2. Iterative Search Space
-    search_space = np.linspace(500, max(load_arr)*12, 30)
+    best_pcm = None
+    best_pcm_savings = -1e9
     
-    best_pcm = {"opex_savings": -1, "payback": 99}
-    for trh in search_space:
-        c_tr = trh / 8.0 # 8 Hour charge
-        sim = simulate_pcm(load_arr, tar_arr, fleet_tr, trh, c_tr)
-        cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates)
+    for tes_trh in test_capacities:
+        charge_chiller_tr = tes_trh / 8.0
         
-        sav = sim_conv["annual_opex"] - sim["annual_opex"]
-        delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
-        pb = eval_payback(delta_c, sav)
+        sim_pcm = simulate_pcm_tes_24h(df_24h, tes_trh, charge_chiller_tr, fleet_installed_tr=peak_tr)
+        pcm_capex = calc_capex_breakup(scope, "PCM TES", peak_tr, tes_trh, charge_chiller_tr, rates)["total_capex"]
+        pcm_opex = sim_pcm["annual_opex"]
         
-        if pb <= 4.0 and sav > best_pcm["opex_savings"]:
-            best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb}
+        opex_savings = base_opex - pcm_opex
+        capex_delta = pcm_capex if scope == "Brownfield (Retrofit)" else (pcm_capex - base_capex)
+        payback, roi = calc_payback_and_roi(capex_delta, opex_savings)
+        
+        if payback <= 4.0 and opex_savings > best_pcm_savings:
+            best_pcm_savings = opex_savings
+            best_pcm = {
+                "tes_trh": tes_trh,
+                "charge_chiller_tr": charge_chiller_tr,
+                "sim": sim_pcm,
+                "capex": pcm_capex,
+                "opex": pcm_opex,
+                "opex_savings": opex_savings,
+                "payback_years": payback,
+                "roi_pct": roi,
+                "num_tanks": int(np.ceil(tes_trh / 25000.0))
+            }
             
-    # Fallback if no <4 yr found
-    if best_pcm["opex_savings"] == -1:
-        trh, c_tr = 3017.0, 378.0
-        sim = simulate_pcm(load_arr, tar_arr, fleet_tr, trh, c_tr)
-        cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates)
-        best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sim_conv["annual_opex"] - sim["annual_opex"], "payback": eval_payback(cap["Total CAPEX"], sim_conv["annual_opex"] - sim["annual_opex"])}
+    if best_pcm is None:
+        tes_trh = 3017.0
+        charge_chiller_tr = 378.0
+        sim_pcm = simulate_pcm_tes_24h(df_24h, tes_trh, charge_chiller_tr, fleet_installed_tr=peak_tr)
+        pcm_capex = calc_capex_breakup(scope, "PCM TES", peak_tr, tes_trh, charge_chiller_tr, rates)["total_capex"]
+        pcm_opex = sim_pcm["annual_opex"]
+        opex_savings = base_opex - pcm_opex
+        payback, roi = calc_payback_and_roi(pcm_capex if scope == "Brownfield (Retrofit)" else (pcm_capex - base_capex), opex_savings)
+        best_pcm = {
+            "tes_trh": tes_trh,
+            "charge_chiller_tr": charge_chiller_tr,
+            "sim": sim_pcm,
+            "capex": pcm_capex,
+            "opex": pcm_opex,
+            "opex_savings": opex_savings,
+            "payback_years": payback,
+            "roi_pct": roi,
+            "num_tanks": 1
+        }
 
-    best_strat = {"opex_savings": -1, "payback": 99}
-    for trh in search_space:
-        sim = simulate_stratified(load_arr, tar_arr, fleet_tr, trh)
-        cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates)
+    best_strat = None
+    best_strat_savings = -1e9
+    
+    for tes_trh in test_capacities:
+        sim_strat = simulate_stratified_tes_24h(df_24h, tes_trh, fleet_installed_tr=peak_tr)
+        strat_capex = calc_capex_breakup(scope, "Stratified TES", peak_tr, tes_trh, 0, rates)["total_capex"]
+        strat_opex = sim_strat["annual_opex"]
         
-        sav = sim_conv["annual_opex"] - sim["annual_opex"]
-        delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
-        pb = eval_payback(delta_c, sav)
+        opex_savings = base_opex - strat_opex
+        capex_delta = strat_capex if scope == "Brownfield (Retrofit)" else (strat_capex - base_capex)
+        payback, roi = calc_payback_and_roi(capex_delta, opex_savings)
         
-        if pb <= 4.0 and sav > best_strat["opex_savings"]:
-            best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb}
+        if payback <= 4.0 and opex_savings > best_strat_savings:
+            best_strat_savings = opex_savings
+            best_strat = {
+                "tes_trh": tes_trh,
+                "charge_chiller_tr": 0.0,
+                "sim": sim_strat,
+                "capex": strat_capex,
+                "opex": strat_opex,
+                "opex_savings": opex_savings,
+                "payback_years": payback,
+                "roi_pct": roi,
+                "num_tanks": int(np.ceil(tes_trh / 25000.0))
+            }
             
-    if best_strat["opex_savings"] == -1:
-        trh = 2900.0
-        sim = simulate_stratified(load_arr, tar_arr, fleet_tr, trh)
-        cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates)
-        best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sim_conv["annual_opex"] - sim["annual_opex"], "payback": eval_payback(cap["Total CAPEX"], sim_conv["annual_opex"] - sim["annual_opex"])}
+    if best_strat is None:
+        tes_trh = 2901.0
+        sim_strat = simulate_stratified_tes_24h(df_24h, tes_trh, fleet_installed_tr=peak_tr)
+        strat_capex = calc_capex_breakup(scope, "Stratified TES", peak_tr, tes_trh, 0, rates)["total_capex"]
+        strat_opex = sim_strat["annual_opex"]
+        opex_savings = base_opex - strat_opex
+        payback, roi = calc_payback_and_roi(strat_capex if scope == "Brownfield (Retrofit)" else (strat_capex - base_capex), opex_savings)
+        best_strat = {
+            "tes_trh": tes_trh,
+            "charge_chiller_tr": 0.0,
+            "sim": sim_strat,
+            "capex": strat_capex,
+            "opex": strat_opex,
+            "opex_savings": opex_savings,
+            "payback_years": payback,
+            "roi_pct": roi,
+            "num_tanks": 1
+        }
 
     return {
-        "c": {"capex": cap_conv["Total CAPEX"], "opex": sim_conv["annual_opex"], "bk": cap_conv["Breakdown"], "sim": sim_conv},
-        "p": {"tes_trh": best_pcm["tes_trh"], "chiller_tr": best_pcm["chiller_tr"], "capex": best_pcm["cap"]["Total CAPEX"], "opex": best_pcm["sim"]["annual_opex"], "bk": best_pcm["cap"]["Breakdown"], "sim": best_pcm["sim"], "pb": best_pcm["payback"], "sav": best_pcm["opex_savings"]},
-        "s": {"tes_trh": best_strat["tes_trh"], "capex": best_strat["cap"]["Total CAPEX"], "opex": best_strat["sim"]["annual_opex"], "bk": best_strat["cap"]["Breakdown"], "sim": best_strat["sim"], "pb": best_strat["payback"], "sav": best_strat["opex_savings"]}
+        "baseline": {
+            "capex": base_capex,
+            "opex": base_opex,
+            "sim": base_sim
+        },
+        "pcm": best_pcm,
+        "stratified": best_strat
     }
