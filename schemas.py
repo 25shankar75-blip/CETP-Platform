@@ -17,6 +17,13 @@ class ScopeEnum(str, Enum):
     GREENFIELD = "Greenfield"
     BROWNFIELD = "Brownfield (Retrofit)"
 
+class SectorEnum(str, Enum):
+    PHARMA = "Pharmaceutical"
+    DATA_CENTRE = "Data Centre"
+    FMCG = "FMCG"
+    AUTO = "Auto"
+    COMMERCIAL = "Commercial"
+
 class ChillerTypeEnum(str, Enum):
     WC_CENTRIFUGAL = "Water-Cooled Centrifugal"
     WC_VFD_SCREW = "Water-Cooled VFD Screw"
@@ -24,7 +31,7 @@ class ChillerTypeEnum(str, Enum):
     BRINE_GLYCOL = "Sub-Zero Brine Chiller"
 
 class ProjectConfig(BaseModel):
-    project_name: str = "Mondelez 3017 TRh Retrofit"
+    project_name: str = "Mondelez 3017 TRh"
     location: str = "Gurugram, HR"
     scope: str = ScopeEnum.BROWNFIELD.value
     currency: str = "INR (₹)"

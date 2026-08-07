@@ -8,7 +8,7 @@ from physics_engine import simulate_conventional, simulate_pcm, simulate_stratif
 def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, charge_chiller_tr, rates):
     b = {"Chiller Equip.": 0, "TES Tank": 0, "PCM Media": 0, "Pumps & PHE": 0, "Electrical": 0}
     if sys_type == "Conventional":
-        if scope == "Brownfield (Retrofit)": return {"Total CAPEX": 0.0, "Breakdown": b} # SUNK COST LOCK
+        if scope == "Brownfield (Retrofit)": return {"Total CAPEX": 0.0, "Breakdown": b} # SUNK COST BASELINE
         b["Chiller Equip."] = fleet_tr * rates["base_chiller_rate"]
         b["Pumps & PHE"] = fleet_tr * 2500
         b["Electrical"] = fleet_tr * 1500
@@ -30,20 +30,18 @@ def eval_payback(capex_delta, opex_savings):
     if opex_savings <= 0: return 99.9
     return capex_delta / opex_savings
 
-def optimize_plant(df_comp, load_arr, tar_arr, proj_scope, audit_cfg, rates, running_days):
+def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, rates, running_days):
     fleet_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
     
-    # 1. Evaluate Baseline (Captures Audited Inefficiency for Brownfield)
-    sim_conv = simulate_conventional(load_arr, tar_arr, fleet_tr, proj_scope, audit_cfg, df_comp, running_days)
+    sim_conv = simulate_conventional(load_arr, tar_arr, wbt_arr, fleet_tr, proj_scope, audit_cfg, df_comp, running_days)
     cap_conv = build_capex_breakdown("Conventional", proj_scope, fleet_tr, 0, 0, rates)
     
-    # 2. Iterate Tank Sizes
     search_space = np.linspace(500, max(load_arr)*12, 25)
     best_pcm = {"opex_savings": -1, "payback": 99}
     
     for trh in search_space:
         c_tr = trh / 8.0 
-        sim = simulate_pcm(load_arr, tar_arr, fleet_tr, trh, c_tr, df_comp, running_days)
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, fleet_tr, trh, c_tr, df_comp, running_days)
         cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates)
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
@@ -52,18 +50,17 @@ def optimize_plant(df_comp, load_arr, tar_arr, proj_scope, audit_cfg, rates, run
         if pb <= 4.0 and sav > best_pcm["opex_savings"]:
             best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0))}
             
-    if best_pcm["opex_savings"] == -1: # Fallback to Mondelez Spec
+    if best_pcm["opex_savings"] == -1:
         trh, c_tr = 3017.0, 378.0
-        sim = simulate_pcm(load_arr, tar_arr, fleet_tr, trh, c_tr, df_comp, running_days)
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, fleet_tr, trh, c_tr, df_comp, running_days)
         cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates)
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
         best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": eval_payback(delta_c, sav), "num_tanks": 1}
 
-    # 3. Stratified Loop
     best_strat = {"opex_savings": -1, "payback": 99}
     for trh in search_space:
-        sim = simulate_stratified(load_arr, tar_arr, fleet_tr, trh, df_comp, running_days)
+        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, fleet_tr, trh, df_comp, running_days)
         cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates)
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
@@ -74,14 +71,13 @@ def optimize_plant(df_comp, load_arr, tar_arr, proj_scope, audit_cfg, rates, run
             
     if best_strat["opex_savings"] == -1:
         trh = 2900.0
-        sim = simulate_stratified(load_arr, tar_arr, fleet_tr, trh, df_comp, running_days)
+        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, fleet_tr, trh, df_comp, running_days)
         cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates)
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
         best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, "payback": eval_payback(delta_c, sav), "num_tanks": 1}
 
-    # 4. Integrate DG Outage Cost Penalties
-    # DG Cost = (Daily Outage Hrs) * (Avg Baseline Load kW vs Minimal Secondary Pump kW) * Diesel Cost * Running Days
+    # Apply DG Outage Savings (Fixed KeyError via direct dictionary references)
     dg_cost_baseline = rates["dg_diesel_cost_kwh"] * (np.mean(sim_conv["comp_kw"]) + np.mean(sim_conv["chw_pump_kw"])) * rates["daily_outage_hrs"] * running_days
     dg_cost_tes_p = rates["dg_diesel_cost_kwh"] * (np.mean(best_pcm["sim"]["chw_pump_kw"])) * rates["daily_outage_hrs"] * running_days
     dg_cost_tes_s = rates["dg_diesel_cost_kwh"] * (np.mean(best_strat["sim"]["chw_pump_kw"])) * rates["daily_outage_hrs"] * running_days

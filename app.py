@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import json
 
-from schemas import CURRENCY_MULTIPLIERS, ProjectConfig, AuditConfig, FinancialConfig, ChillerTypeEnum
-from physics_engine import calc_tr, calc_pump_kw
-from financial_engine import format_currency
+from schemas import CURRENCY_MULTIPLIERS, ProjectConfig, AuditConfig, FinancialConfig, ChillerTypeEnum, ScopeEnum, SectorEnum
+from physics_engine import calc_tr, calc_pump_kw, fetch_live_weather_wbt
+from financial_engine import fetch_live_currency_rates, format_currency
 from optimizer import optimize_plant
 from report_generator import generate_pdf_report, generate_word_report 
 
@@ -59,15 +59,25 @@ st.sidebar.markdown("---")
 if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use_container_width=True):
     rates_dict = st.session_state.fin_cfg.dict()
     audit_dict = st.session_state.audit_cfg.dict()
+    
+    # Live Weather Fetch for Precise kWh calculation
+    wbt_data = fetch_live_weather_wbt(st.session_state.proj_cfg.location)
+    wbt_arr = wbt_data["dbt"] if wbt_data["status"] == "FALLBACK" else wbt_data["wbt"]
+
     st.session_state.opt_results = optimize_plant(
         st.session_state.chiller_fleet, 
         st.session_state.df_24h["Cooling Load (TR)"].values, 
         st.session_state.df_24h["Tariff (₹/kWh)"].values, 
+        wbt_arr,
         st.session_state.proj_cfg.scope, 
-        audit_dict, rates_dict,
+        audit_dict, 
+        rates_dict,
         st.session_state.proj_cfg.running_days
     )
-    st.sidebar.success("Optimization Complete! ✅ Check Output Tabs.")
+    if wbt_data["status"] == "LIVE":
+        st.sidebar.success(f"Live Weather fetched for {st.session_state.proj_cfg.location}! Optimization Complete.")
+    else:
+        st.sidebar.success("Optimization Complete! (Synthetic Weather Used)")
 
 # --- MASTER TABS ---
 t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials & Exec", "📄 Export"])
@@ -180,7 +190,6 @@ with t6:
         days = st.session_state.proj_cfg.running_days
         st.header("💰 Executive Economics & OPEX Breakdown")
         
-        # OPEX Breakdown Matrix
         st.subheader("⚡ Annual OPEX Component Breakdown")
         opex_data = []
         for opt_name, k in [("Conventional Baseline", "c"), ("PCM TES Optimum", "p"), ("Stratified TES Optimum", "s")]:
@@ -196,7 +205,6 @@ with t6:
             })
         st.table(pd.DataFrame(opex_data))
 
-        # CAPEX Breakup
         st.subheader("🏗️ CAPEX Breakup")
         df_bk = pd.DataFrame({
             "Item": list(res['c']['bk'].keys()),
