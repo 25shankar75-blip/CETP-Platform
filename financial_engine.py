@@ -18,7 +18,7 @@ def fetch_live_currency_rates() -> dict:
                 "MYR (RM)": {"rate": r.get("MYR", 0.053), "symbol": "RM", "unit": "M", "div": 1e6}
             }
     except Exception:
-        pass
+        pass 
     return CURRENCY_MULTIPLIERS
 
 def format_currency(value_inr: float, currency_str: str, live_rates=None) -> str:

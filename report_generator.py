@@ -36,7 +36,7 @@ def generate_pdf_report(p_name, loc, scope, curr, res):
         doc.build(story)
         buf.seek(0)
         return buf.getvalue()
-    except Exception as e:
+    except Exception:
         return b"PDF Generation failed. Install reportlab."
 
 def generate_word_report(p_name, loc, scope, curr, res):
@@ -48,5 +48,5 @@ def generate_word_report(p_name, loc, scope, curr, res):
         doc.save(buf)
         buf.seek(0)
         return buf.getvalue()
-    except Exception as e:
+    except Exception:
         return b"Word Generation failed. Install python-docx."

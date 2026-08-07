@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import json
 
-from schemas import CURRENCY_MULTIPLIERS, ProjectConfig, AuditConfig, FinancialConfig
-from physics_engine import calc_tr, calc_pump_kw, expand_24_to_8760, fetch_live_weather_wbt
-from financial_engine import fetch_live_currency_rates, format_currency
+from schemas import CURRENCY_MULTIPLIERS, ProjectConfig, AuditConfig, FinancialConfig, ChillerTypeEnum
+from physics_engine import calc_tr, calc_pump_kw
+from financial_engine import format_currency
 from optimizer import optimize_plant
 from report_generator import generate_pdf_report, generate_word_report 
 
@@ -20,14 +20,17 @@ st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal
 
 # --- INITIALIZE STATE ---
 if "df_24h" not in st.session_state:
+    hours = np.arange(1, 25)
+    loads = [1047.82]*8 + [1746.36]*2 + [2095.63]*2 + [2794.18]*4 + [2444.90]*4 + [2095.63]*2 + [1047.82]*2
+    tariffs = [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2
     st.session_state.df_24h = pd.DataFrame({
-        "Hour": np.arange(1, 25),
-        "Load (TR)": [1047.8]*8 + [1746.3]*2 + [2095.6]*2 + [2794.1]*4 + [2444.9]*4 + [2095.6]*2 + [1047.8]*2,
-        "Tariff": [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2,
-        " ": [""]*24 # Anti-freeze column
+        "Hour": hours, "Cooling Load (TR)": loads, "Tariff (₹/kWh)": tariffs, " ": [""]*24 
     })
 if "chiller_fleet" not in st.session_state:
-    st.session_state.chiller_fleet = pd.DataFrame([{"Capacity (TR)": 1000.0, "Quantity": 2, "Type": "Water-Cooled Centrifugal"}])
+    st.session_state.chiller_fleet = pd.DataFrame([
+        {"Capacity (TR)": 1000.0, "Quantity": 2, "Chiller Type": "Water-Cooled Centrifugal", "ikW/TR": 0.62},
+        {"Capacity (TR)": 800.0, "Quantity": 1, "Chiller Type": "Water-Cooled VFD Screw", "ikW/TR": 0.65}
+    ])
 if "proj_cfg" not in st.session_state: st.session_state.proj_cfg = ProjectConfig()
 if "audit_cfg" not in st.session_state: st.session_state.audit_cfg = AuditConfig()
 if "fin_cfg" not in st.session_state: st.session_state.fin_cfg = FinancialConfig()
@@ -45,27 +48,29 @@ if uploaded_file:
         st.session_state.df_24h = pd.DataFrame(data["df_24h"])
         st.session_state.chiller_fleet = pd.DataFrame(data["chiller_fleet"])
         st.sidebar.success("Scenario Restored! ✅")
-    except Exception as e:
+    except Exception:
         st.sidebar.error("Invalid format")
 
 scenario_data = {"df_24h": st.session_state.df_24h.to_dict(), "chiller_fleet": st.session_state.chiller_fleet.to_dict()}
 st.sidebar.download_button("💾 Save Project (.json)", json.dumps(scenario_data), "CETP_Scenario.json", "application/json", use_container_width=True)
 
 st.sidebar.markdown("---")
+# EXPLICIT RUN BUTTON
 if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use_container_width=True):
     rates_dict = st.session_state.fin_cfg.dict()
     audit_dict = st.session_state.audit_cfg.dict()
     st.session_state.opt_results = optimize_plant(
         st.session_state.chiller_fleet, 
-        st.session_state.df_24h["Load (TR)"].values, 
-        st.session_state.df_24h["Tariff"].values, 
+        st.session_state.df_24h["Cooling Load (TR)"].values, 
+        st.session_state.df_24h["Tariff (₹/kWh)"].values, 
         st.session_state.proj_cfg.scope, 
-        audit_dict, rates_dict
+        audit_dict, rates_dict,
+        st.session_state.proj_cfg.running_days
     )
     st.sidebar.success("Optimization Complete! ✅ Check Output Tabs.")
 
 # --- MASTER TABS ---
-t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials & Exec Summary", "📄 Report"])
+t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials & Exec", "📄 Export"])
 
 with t1:
     st.subheader("Global Settings")
@@ -73,6 +78,7 @@ with t1:
     st.session_state.proj_cfg.project_name = c1.text_input("Project Name", st.session_state.proj_cfg.project_name)
     st.session_state.proj_cfg.scope = c2.selectbox("Project Scope", ["Greenfield", "Brownfield (Retrofit)"], index=1)
     st.session_state.proj_cfg.currency = c3.selectbox("Currency", list(CURRENCY_MULTIPLIERS.keys()))
+    st.session_state.proj_cfg.running_days = c1.number_input("Annual Running Days", value=st.session_state.proj_cfg.running_days, min_value=1, max_value=365)
 
     if st.session_state.proj_cfg.scope == "Brownfield (Retrofit)":
         st.markdown("---")
@@ -113,7 +119,15 @@ with t1:
 
     st.markdown("---")
     st.subheader("🏭 Installed / Proposed Chiller Fleet")
-    st.session_state.chiller_fleet = st.data_editor(st.session_state.chiller_fleet, num_rows="dynamic", use_container_width=True)
+    st.session_state.chiller_fleet = st.data_editor(
+        st.session_state.chiller_fleet, 
+        num_rows="dynamic", 
+        use_container_width=True,
+        column_config={
+            "Chiller Type": st.column_config.SelectboxColumn("Chiller Type", options=[t.value for t in ChillerTypeEnum], required=True),
+            "ikW/TR": st.column_config.NumberColumn("ikW/TR", min_value=0.1, max_value=3.0, format="%.2f", required=True)
+        }
+    )
 
 with t2:
     st.header("📊 Interactive Load & Tariff Matrices")
@@ -134,11 +148,11 @@ def render_output_tab(data_dict, title_prefix, curr):
         "Cooling TR": sim["cooling_tr"],
         "Charge TR": sim["charge_tr"],
         "Discharge TR": sim["discharge_tr"],
-        "Chiller (kW)": sim["comp_kw"],
-        "CHW Pump (kW)": sim["chw_pump_kw"],
-        "CT Pump (kW)": sim["cw_pump_kw"],
-        "CT Fan (kW)": sim["ct_fan_kw"],
-        "Total (kW)": sim["total_kw"],
+        "Chiller kW": sim["comp_kw"],
+        "CHW Pump kW": sim["chw_pump_kw"],
+        "CW Pump kW": sim["cw_pump_kw"],
+        "CT Fan kW": sim["ct_fan_kw"],
+        "Total kW": sim["total_kw"],
         "Tariff (₹)": sim["tariff"],
         "Hourly Cost": sim["hourly_cost"]
     })
@@ -151,20 +165,39 @@ with t3:
     else: st.info("Run Optimizer in the sidebar.")
 
 with t4:
-    if st.session_state.opt_results:
-        res = st.session_state.opt_results['p']
-        render_output_tab(res, f"🧊 PCM TES Optimum ({res['tes_trh']:.0f} TRh)", st.session_state.proj_cfg.currency)
+    if st.session_state.opt_results: render_output_tab(st.session_state.opt_results['p'], f"🧊 PCM TES Optimum ({st.session_state.opt_results['p']['tes_trh']:.0f} TRh) - {st.session_state.opt_results['p'].get('num_tanks',1)} Tank(s)", st.session_state.proj_cfg.currency)
 
 with t5:
-    if st.session_state.opt_results:
-        res = st.session_state.opt_results['s']
-        render_output_tab(res, f"🌊 Stratified TES Optimum ({res['tes_trh']:.0f} TRh)", st.session_state.proj_cfg.currency)
+    if st.session_state.opt_results: render_output_tab(st.session_state.opt_results['s'], f"🌊 Stratified TES Optimum ({st.session_state.opt_results['s']['tes_trh']:.0f} TRh) - {st.session_state.opt_results['s'].get('num_tanks',1)} Tank(s)", st.session_state.proj_cfg.currency)
+
+def calc_annual_cost(kw_array, tariff_array, days):
+    return np.sum(np.array(kw_array) * np.array(tariff_array)) * days
 
 with t6:
     if st.session_state.opt_results:
         res = st.session_state.opt_results
         curr = st.session_state.proj_cfg.currency
-        st.header("💰 Executive Economics & Breakdown")
+        days = st.session_state.proj_cfg.running_days
+        st.header("💰 Executive Economics & OPEX Breakdown")
+        
+        # OPEX Breakdown Matrix
+        st.subheader("⚡ Annual OPEX Component Breakdown")
+        opex_data = []
+        for opt_name, k in [("Conventional Baseline", "c"), ("PCM TES Optimum", "p"), ("Stratified TES Optimum", "s")]:
+            sim = res[k]["sim"]
+            opex_data.append({
+                "Option": opt_name,
+                "Chiller OPEX": format_currency(calc_annual_cost(sim["comp_kw"], sim["tariff"], days), curr),
+                "CHW Pumps OPEX": format_currency(calc_annual_cost(sim["chw_pump_kw"], sim["tariff"], days), curr),
+                "CW Pumps OPEX": format_currency(calc_annual_cost(sim["cw_pump_kw"], sim["tariff"], days), curr),
+                "CT Fans OPEX": format_currency(calc_annual_cost(sim["ct_fan_kw"], sim["tariff"], days), curr),
+                "DG Outage Penalty": format_currency(res[k].get("dg_cost", 0.0), curr),
+                "Total OPEX": format_currency(res[k]["opex"], curr)
+            })
+        st.table(pd.DataFrame(opex_data))
+
+        # CAPEX Breakup
+        st.subheader("🏗️ CAPEX Breakup")
         df_bk = pd.DataFrame({
             "Item": list(res['c']['bk'].keys()),
             "Baseline": [format_currency(v, curr) for v in res['c']['bk'].values()],

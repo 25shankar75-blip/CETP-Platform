@@ -17,12 +17,19 @@ class ScopeEnum(str, Enum):
     GREENFIELD = "Greenfield"
     BROWNFIELD = "Brownfield (Retrofit)"
 
+class ChillerTypeEnum(str, Enum):
+    WC_CENTRIFUGAL = "Water-Cooled Centrifugal"
+    WC_VFD_SCREW = "Water-Cooled VFD Screw"
+    AC_VFD = "Air-Cooled VFD"
+    BRINE_GLYCOL = "Sub-Zero Brine Chiller"
+
 class ProjectConfig(BaseModel):
     project_name: str = "Mondelez 3017 TRh Retrofit"
     location: str = "Gurugram, HR"
     scope: str = ScopeEnum.BROWNFIELD.value
     currency: str = "INR (₹)"
     peak_tr: float = 2794.18
+    running_days: int = 365
 
 class AuditConfig(BaseModel):
     run_chw_sup_c: float = 8.0
