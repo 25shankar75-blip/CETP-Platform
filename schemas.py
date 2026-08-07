@@ -2,13 +2,11 @@
 Cooling Energy Transition Platform (CETP) - Data Contracts & Schemas
 File: schemas.py
 """
-
 from pydantic import BaseModel, Field
-from typing import List, Optional
 from enum import Enum
 
 CURRENCY_MULTIPLIERS = {
-    "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Crores", "div": 1e7},
+    "INR (₹)": {"rate": 1.0, "symbol": "₹", "unit": "Cr", "div": 1e7},
     "USD ($)": {"rate": 0.012, "symbol": "$", "unit": "M", "div": 1e6},
     "EUR (€)": {"rate": 0.011, "symbol": "€", "unit": "M", "div": 1e6},
     "AED (د.إ)": {"rate": 0.044, "symbol": "AED", "unit": "M", "div": 1e6},
@@ -26,74 +24,45 @@ class SectorEnum(str, Enum):
     AUTO = "Auto"
     COMMERCIAL = "Commercial"
 
-class CurrencyEnum(str, Enum):
-    INR = "INR (₹)"
-    USD = "USD ($)"
-    EUR = "EUR (€)"
-    AED = "AED (د.إ)"
-    MYR = "MYR (RM)"
-
 class ChillerTypeEnum(str, Enum):
     WC_CENTRIFUGAL = "Water-Cooled Centrifugal"
     WC_VFD_SCREW = "Water-Cooled VFD Screw"
     AC_VFD = "Air-Cooled VFD"
-    AC_SCROLL = "Air-Cooled Scroll"
     BRINE_GLYCOL = "Sub-Zero Brine Chiller"
-    DUAL_MODE = "Dual-Mode Chiller"
-
-class ChillerSpec(BaseModel):
-    capacity_tr: float = Field(..., gt=0)
-    quantity: int = Field(..., gt=0)
-    chiller_type: ChillerTypeEnum
 
 class ProjectConfig(BaseModel):
     project_name: str = "Mondelez 3017 TRh Retrofit"
-    location: str = "Ujjain, MP"
-    latitude: float = 23.1765
-    longitude: float = 75.7885
+    location: str = "Gurugram, HR"
     sector: SectorEnum = SectorEnum.FMCG
     scope: ScopeEnum = ScopeEnum.BROWNFIELD
-    currency: CurrencyEnum = CurrencyEnum.INR
+    currency: str = "INR (₹)"
     peak_tr: float = 2794.18
 
 class ThermoConfig(BaseModel):
-    chw_supply_temp: float = 7.0
-    chw_return_temp: float = 14.0
-    brine_supply_temp: float = -5.5
-    brine_return_temp: float = -2.1
-    phe_pinch_deg_c: float = 1.5
-    fom_efficiency: float = 0.90
-    water_cp: float = 4.186       # kJ/kg.K
-    brine_cp: float = 3.65        # 30% MEG Brine
-    water_rho: float = 1000.0     # kg/m3
-    brine_rho: float = 1035.0
+    chw_supply_c: float = 7.0
+    chw_return_c: float = 14.0
+    brine_supply_c: float = -5.5
+    phe_pinch_c: float = 1.5
 
 class AuditConfig(BaseModel):
-    running_chw_supply_c: float = 8.0
-    running_chw_return_c: float = 12.0
-    running_chw_flow_m3h: float = 500.0
-    running_cw_supply_c: float = 32.0
-    running_cw_return_c: float = 37.0
-    running_cw_flow_m3h: float = 600.0
-    running_brine_supply_c: float = -5.5
-    running_brine_return_c: float = -2.1
-    chw_pump_head_m: float = 30.0
-    cw_pump_head_m: float = 25.0
-    ct_pump_head_m: float = 20.0
-    ct_fan_power_kw: float = 45.0
-    pump_eff: float = 0.75
+    # CHW Circuit
+    run_chw_sup_c: float = 8.0
+    run_chw_ret_c: float = 12.0
+    run_chw_flow_m3h: float = 500.0
+    run_chw_head_m: float = 30.0
+    # CW Circuit
+    run_cw_sup_c: float = 32.0
+    run_cw_ret_c: float = 37.0
+    run_cw_flow_m3h: float = 600.0
+    run_cw_head_m: float = 25.0
+    # Fans & Actuals
+    run_ct_fan_kw: float = 45.0
+    pump_efficiency: float = 0.75
 
 class FinancialConfig(BaseModel):
-    base_chiller_rate_per_tr: float = 22000.0
-    ac_chiller_rate_per_tr: float = 24000.0
-    brine_chiller_rate_per_tr: float = 25000.0
-    pcm_tes_rate_per_trh: float = 7800.0
-    stratified_tes_rate_per_trh: float = 18000.0
-    chw_pump_rate_per_kw: float = 8500.0
-    cw_pump_rate_per_kw: float = 8000.0
-    ct_fan_rate_per_kw: float = 12000.0
-    dg_set_rate_per_kva: float = 12500.0
-    electricity_tariff_avg: float = 6.11
-    dg_diesel_cost_per_kwh: float = 24.50
-    daily_outage_hours: float = 1.5
+    base_chiller_rate: float = 22000.0
+    brine_chiller_rate: float = 25000.0
+    pcm_tes_rate: float = 7800.0
+    stratified_tes_rate: float = 18000.0
+    dg_set_rate: float = 12500.0
     indirects_pct: float = 0.30
