@@ -29,7 +29,6 @@ def fetch_live_weather_wbt(location_str: str) -> dict:
             w_data = json.loads(w_resp.read().decode())
             dbt = w_data["hourly"]["temperature_2m"][:24]
             rh = w_data["hourly"]["relative_humidity_2m"][:24]
-            # Stull WBT Approximation
             wbt = [
                 d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035 
                 for d, r in zip(dbt, rh)
@@ -79,7 +78,6 @@ def get_plv_kw_tr(load_factor, base_kw_tr=0.62, is_air_cooled=False, is_brine=Fa
     return base * plv * weather_relief
 
 def calc_water_consumption_m3(cooling_tr_array, is_air_cooled=False, running_days=365):
-    """Calculates annual Cooling Tower water evaporation loss (16 L/TRh)."""
     if is_air_cooled: return 0.0
     total_trh_day = np.sum(cooling_tr_array)
     water_liters_day = total_trh_day * 16.0
@@ -117,7 +115,7 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
             ct.append(0.0 if is_ac else des_ct_kw * flow_ratio)
             
     tot_kw = np.array(comp) + np.array(chw_pri) + np.array(chw_sec) + np.array(cw) + np.array(ct)
-    water_m3 = calc_water_consumption_m3(op_tr_array:=np.array(op_chiller_tr), is_air_cooled=is_ac, running_days=running_days)
+    water_m3 = calc_water_consumption_m3(np.array(op_chiller_tr), is_air_cooled=is_ac, running_days=running_days)
     
     return {
         "cooling_tr": load_24, "charge_tr": charge, "discharge_tr": discharge, "op_chiller_tr": op_chiller_tr,

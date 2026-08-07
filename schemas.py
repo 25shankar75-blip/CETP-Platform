@@ -51,17 +51,17 @@ class AuditConfig(BaseModel):
     run_cw_flow_m3h: float = 600.0
     run_cw_head_m: float = 25.0
     run_ct_fan_kw: float = 45.0
-    water_cost_per_m3: float = 65.0 # ₹/m3
+    water_cost_per_m3: float = 65.0
     daily_outage_hrs: float = 1.5
 
 class FinancialConfig(BaseModel):
-    base_chiller_rate: float = 22000.0   # ₹/TR
-    ac_chiller_rate: float = 24000.0     # ₹/TR
-    brine_chiller_rate: float = 25000.0  # ₹/TR
-    pcm_tes_rate: float = 7800.0         # ₹/TRh
-    stratified_tes_rate: float = 18000.0 # ₹/TRh
-    dg_set_rate: float = 12500.0         # ₹/kVA
-    transformer_rate: float = 3500.0     # ₹/kVA
-    water_infra_rate: float = 1200.0     # ₹/TR
-    indirects_pct: float = 0.30          # 30% Indirects / AMC
-    dg_diesel_cost_kwh: float = 24.50    # ₹/kWh on DG
+    base_chiller_rate: float = 22000.0
+    ac_chiller_rate: float = 24000.0
+    brine_chiller_rate: float = 25000.0
+    pcm_tes_rate: float = 7800.0
+    stratified_tes_rate: float = 18000.0
+    dg_set_rate: float = 12500.0
+    transformer_rate: float = 3500.0
+    water_infra_rate: float = 1200.0
+    indirects_pct: float = 0.30
+    dg_diesel_cost_kwh: float = 24.50

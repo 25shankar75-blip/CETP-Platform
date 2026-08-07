@@ -49,17 +49,18 @@ if uploaded_file:
         st.session_state.chiller_fleet = pd.DataFrame(data["chiller_fleet"])
         st.sidebar.success("Scenario Restored! ✅")
     except Exception:
-        st.sidebar.error("Invalid scenario file format")
+        st.sidebar.error("Invalid format")
 
 scenario_data = {"df_24h": st.session_state.df_24h.to_dict(), "chiller_fleet": st.session_state.chiller_fleet.to_dict()}
 st.sidebar.download_button("💾 Save Project (.json)", json.dumps(scenario_data), "CETP_Scenario.json", "application/json", use_container_width=True)
 
 st.sidebar.markdown("---")
+# EXPLICIT RUN BUTTON
 if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use_container_width=True):
     rates_dict = st.session_state.fin_cfg.dict()
     audit_dict = st.session_state.audit_cfg.dict()
     
-    # Fetch Weather Data
+    # Live Weather Geocoding Fetch
     wbt_data = fetch_live_weather_wbt(st.session_state.proj_cfg.location)
     wbt_arr = wbt_data["wbt"]
 
@@ -79,7 +80,7 @@ if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use
         st.sidebar.success("Optimization Complete! (Synthetic Weather Model Used)")
 
 # --- MASTER TABS ---
-t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Executive Summary", "📄 Export"])
+t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials & Exec", "📄 Export"])
 
 with t1:
     st.subheader("Global Settings")
@@ -131,12 +132,11 @@ with t1:
     st.markdown("---")
     st.subheader("🏭 Installed / Proposed Chiller Fleet Array")
     
-    # Array calculations
     active_fleet = st.session_state.chiller_fleet[st.session_state.chiller_fleet["Standby"] == False] if "Standby" in st.session_state.chiller_fleet.columns else st.session_state.chiller_fleet
     tot_chiller_tr = sum(st.session_state.chiller_fleet["Capacity (TR)"] * st.session_state.chiller_fleet["Quantity"])
     tot_active_tr = sum(active_fleet["Capacity (TR)"] * active_fleet["Quantity"])
-    tot_ct_tr = tot_active_tr * 1.25 # Heat Rejection Factor
-    
+    tot_ct_tr = tot_active_tr * 1.25
+
     a1, a2, a3 = st.columns(3)
     a1.metric("Total Installed Chiller Sizing", f"{tot_chiller_tr:.0f} TR")
     a2.metric("Active Working Capacity", f"{tot_active_tr:.0f} TR")
@@ -207,7 +207,6 @@ with t6:
         days = st.session_state.proj_cfg.running_days
         st.header("💰 Executive Summary & Financial Comparison")
         
-        # Side-by-side Technical Comparison Table
         st.subheader("📊 Technical & Financial Master Comparison")
         comp_summary = pd.DataFrame([
             {

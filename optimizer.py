@@ -133,7 +133,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     best_pcm["payback"] = eval_payback(best_pcm["cap"]["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (best_pcm["cap"]["Total CAPEX"] - cap_conv["Total CAPEX"]), best_pcm["opex_savings"])
     best_strat["payback"] = eval_payback(best_strat["cap"]["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (best_strat["cap"]["Total CAPEX"] - cap_conv["Total CAPEX"]), best_strat["opex_savings"])
 
-    # CO2 Reduction (0.82 kg CO2 / kWh)
+    # CO2 Reduction
     co2_saved_p = ((sim_conv["annual_opex"] - best_pcm["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
     co2_saved_s = ((sim_conv["annual_opex"] - best_strat["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
 
