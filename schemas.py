@@ -45,17 +45,15 @@ class ThermoConfig(BaseModel):
     phe_pinch_c: float = 1.5
 
 class AuditConfig(BaseModel):
-    # CHW Circuit
+    # Measured running parameters for Brownfield Thermodynamics
     run_chw_sup_c: float = 8.0
     run_chw_ret_c: float = 12.0
     run_chw_flow_m3h: float = 500.0
     run_chw_head_m: float = 30.0
-    # CW Circuit
     run_cw_sup_c: float = 32.0
     run_cw_ret_c: float = 37.0
     run_cw_flow_m3h: float = 600.0
     run_cw_head_m: float = 25.0
-    # Fans & Actuals
     run_ct_fan_kw: float = 45.0
     pump_efficiency: float = 0.75
 

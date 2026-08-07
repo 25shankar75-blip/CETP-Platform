@@ -8,7 +8,7 @@ from physics_engine import simulate_conventional, simulate_pcm, simulate_stratif
 def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, charge_chiller_tr, rates):
     b = {"Chiller Equip.": 0, "TES Tank": 0, "PCM Media": 0, "Pumps & PHE": 0, "Electrical": 0}
     if sys_type == "Conventional":
-        if scope == "Brownfield (Retrofit)": return {"Total CAPEX": 0.0, "Breakdown": b} # Sunk Cost
+        if scope == "Brownfield (Retrofit)": return {"Total CAPEX": 0.0, "Breakdown": b} # SUNK COST LOCK
         b["Chiller Equip."] = fleet_tr * rates["base_chiller_rate"]
         b["Pumps & PHE"] = fleet_tr * 2500
         b["Electrical"] = fleet_tr * 1500
@@ -33,50 +33,47 @@ def eval_payback(capex_delta, opex_savings):
 def optimize_plant(df_comp, load_arr, tar_arr, proj_scope, audit_cfg, rates):
     fleet_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
     
-    # 1. Baseline Simulation (Captures Audit Inefficiencies if Brownfield)
     sim_conv = simulate_conventional(load_arr, tar_arr, fleet_tr, proj_scope, audit_cfg)
     cap_conv = build_capex_breakdown("Conventional", proj_scope, fleet_tr, 0, 0, rates)
     
-    search_space = np.linspace(500, max(load_arr)*12, 30)
+    search_space = np.linspace(500, max(load_arr)*12, 25)
     
-    # 2. PCM Optimization
     best_pcm = {"opex_savings": -1, "payback": 99}
     for trh in search_space:
         c_tr = trh / 8.0 
         sim = simulate_pcm(load_arr, tar_arr, fleet_tr, trh, c_tr)
         cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates)
-        
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
-        pb = eval_payback(delta_c, sav)
+        pb = delta_c / sav if sav > 0 else 99.9
         
         if pb <= 4.0 and sav > best_pcm["opex_savings"]:
             best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb}
             
-    if best_pcm["opex_savings"] == -1: # Fallback
+    if best_pcm["opex_savings"] == -1: 
         trh, c_tr = 3017.0, 378.0
         sim = simulate_pcm(load_arr, tar_arr, fleet_tr, trh, c_tr)
         cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates)
-        best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sim_conv["annual_opex"] - sim["annual_opex"], "payback": eval_payback(cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else cap["Total CAPEX"] - cap_conv["Total CAPEX"], sim_conv["annual_opex"] - sim["annual_opex"])}
+        sav = sim_conv["annual_opex"] - sim["annual_opex"]
+        best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": (cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else cap["Total CAPEX"] - cap_conv["Total CAPEX"])/max(1, sav)}
 
-    # 3. Stratified Optimization
     best_strat = {"opex_savings": -1, "payback": 99}
     for trh in search_space:
         sim = simulate_stratified(load_arr, tar_arr, fleet_tr, trh)
         cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates)
-        
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
-        pb = eval_payback(delta_c, sav)
+        pb = delta_c / sav if sav > 0 else 99.9
         
         if pb <= 4.0 and sav > best_strat["opex_savings"]:
             best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb}
             
-    if best_strat["opex_savings"] == -1: # Fallback
+    if best_strat["opex_savings"] == -1:
         trh = 2900.0
         sim = simulate_stratified(load_arr, tar_arr, fleet_tr, trh)
         cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates)
-        best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sim_conv["annual_opex"] - sim["annual_opex"], "payback": eval_payback(cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else cap["Total CAPEX"] - cap_conv["Total CAPEX"], sim_conv["annual_opex"] - sim["annual_opex"])}
+        sav = sim_conv["annual_opex"] - sim["annual_opex"]
+        best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, "payback": (cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else cap["Total CAPEX"] - cap_conv["Total CAPEX"])/max(1, sav)}
 
     return {
         "c": {"capex": cap_conv["Total CAPEX"], "opex": sim_conv["annual_opex"], "bk": cap_conv["Breakdown"], "sim": sim_conv},

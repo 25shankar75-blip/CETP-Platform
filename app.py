@@ -8,17 +8,15 @@ import pandas as pd
 import json
 
 from schemas import CURRENCY_MULTIPLIERS, ProjectConfig, AuditConfig, FinancialConfig
-from physics_engine import calc_tr, calc_pump_kw
+from physics_engine import calc_tr, calc_pump_kw, expand_24_to_8760
+from financial_engine import format_currency
 from optimizer import optimize_plant
+# from report_generator import generate_pdf_report, generate_word_report # Uncomment when needed
 
 st.set_page_config(page_title="CETP Digital Twin", page_icon="❄️", layout="wide")
 st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color: #1e3d59; margin-bottom: 0px; } .sub-header { font-size: 1.05rem; font-weight: 500; color: #438a5e; margin-bottom: 18px; }</style>""", unsafe_allow_html=True)
 st.markdown('<p class="main-header">❄️ Cooling Energy Transition Platform (CETP)</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal Energy Storage Digital Twin</p>', unsafe_allow_html=True)
-
-def format_currency(value_inr: float, currency_str: str) -> str:
-    cfg = CURRENCY_MULTIPLIERS.get(currency_str, CURRENCY_MULTIPLIERS["INR (₹)"])
-    return f"{cfg['symbol']} {(value_inr * cfg['rate']) / cfg['div']:.2f} {cfg['unit']}"
 
 # --- INITIALIZE STATE ---
 if "df_24h" not in st.session_state:
@@ -26,7 +24,7 @@ if "df_24h" not in st.session_state:
         "Hour": np.arange(1, 25),
         "Load (TR)": [1047.8]*8 + [1746.3]*2 + [2095.6]*2 + [2794.1]*4 + [2444.9]*4 + [2095.6]*2 + [1047.8]*2,
         "Tariff": [5.62]*6 + [6.11]*12 + [7.03]*4 + [5.62]*2,
-        " ": [""]*24 
+        " ": [""]*24 # Anti-freeze column
     })
 if "chiller_fleet" not in st.session_state:
     st.session_state.chiller_fleet = pd.DataFrame([{"Capacity (TR)": 1000.0, "Quantity": 2, "Type": "Water-Cooled Centrifugal"}])
@@ -39,20 +37,21 @@ if "opt_results" not in st.session_state: st.session_state.opt_results = None
 st.sidebar.title("🎛️ Execution Controls")
 st.sidebar.markdown("---")
 
-# Save / Upload Scenarios
 st.sidebar.subheader("📂 Scenario Management")
 uploaded_file = st.sidebar.file_uploader("Upload Project (.json)", type=["json"])
 if uploaded_file:
-    data = json.load(uploaded_file)
-    st.session_state.df_24h = pd.DataFrame(data["df_24h"])
-    st.session_state.chiller_fleet = pd.DataFrame(data["chiller_fleet"])
-    st.sidebar.success("Scenario Restored! ✅")
+    try:
+        data = json.load(uploaded_file)
+        st.session_state.df_24h = pd.DataFrame(data["df_24h"])
+        st.session_state.chiller_fleet = pd.DataFrame(data["chiller_fleet"])
+        st.sidebar.success("Scenario Restored! ✅")
+    except Exception as e:
+        st.sidebar.error("Invalid format")
 
 scenario_data = {"df_24h": st.session_state.df_24h.to_dict(), "chiller_fleet": st.session_state.chiller_fleet.to_dict()}
 st.sidebar.download_button("💾 Save Project (.json)", json.dumps(scenario_data), "CETP_Scenario.json", "application/json", use_container_width=True)
 
 st.sidebar.markdown("---")
-# EXPLICIT RUN BUTTON
 if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use_container_width=True):
     rates_dict = st.session_state.fin_cfg.dict()
     audit_dict = st.session_state.audit_cfg.dict()
@@ -66,7 +65,7 @@ if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use
     st.sidebar.success("Optimization Complete! ✅ Check Output Tabs.")
 
 # --- MASTER TABS ---
-t1, t2, t3, t4, t5 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output"])
+t1, t2, t3, t4, t5, t6 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials"])
 
 with t1:
     st.subheader("Global Settings")
@@ -75,11 +74,10 @@ with t1:
     st.session_state.proj_cfg.scope = c2.selectbox("Project Scope", ["Greenfield", "Brownfield (Retrofit)"], index=1)
     st.session_state.proj_cfg.currency = c3.selectbox("Currency", list(CURRENCY_MULTIPLIERS.keys()))
 
-    # CONDITIONAL RETROFIT AUDIT UI
     if st.session_state.proj_cfg.scope == "Brownfield (Retrofit)":
         st.markdown("---")
-        st.header("🔍 Retrofit Audit (Thermodynamic Inefficiency Diagnosis)")
-        st.info("Input real-world measured data. The engine will auto-calculate actual Operating TR and hydraulic inefficiencies to generate Thermodynamic Restoration OPEX Savings.")
+        st.header("🔍 Retrofit Audit (Thermodynamic Restoration Engine)")
+        st.info("Inputs actual running data. Engine auto-calculates inefficiencies and generates Dual-Benefit Savings (Restoration + Tariff Arbitrage).")
         
         with st.form("audit_form"):
             a1, a2, a3 = st.columns(3)
@@ -96,18 +94,11 @@ with t1:
             ct_fan = a3.number_input("CT Fan Power (kW)", value=st.session_state.audit_cfg.run_ct_fan_kw)
             
             if st.form_submit_button("Save Audit Data", use_container_width=True):
-                st.session_state.audit_cfg.run_chw_sup_c = sup
-                st.session_state.audit_cfg.run_chw_ret_c = ret
-                st.session_state.audit_cfg.run_chw_flow_m3h = flow
-                st.session_state.audit_cfg.run_cw_sup_c = c_sup
-                st.session_state.audit_cfg.run_cw_ret_c = c_ret
-                st.session_state.audit_cfg.run_cw_flow_m3h = c_flow
-                st.session_state.audit_cfg.run_chw_head_m = h_chw
-                st.session_state.audit_cfg.run_cw_head_m = h_cw
-                st.session_state.audit_cfg.run_ct_fan_kw = ct_fan
-                st.success("Audit parameters locked! ✅")
+                st.session_state.audit_cfg.run_chw_sup_c, st.session_state.audit_cfg.run_chw_ret_c, st.session_state.audit_cfg.run_chw_flow_m3h = sup, ret, flow
+                st.session_state.audit_cfg.run_cw_sup_c, st.session_state.audit_cfg.run_cw_ret_c, st.session_state.audit_cfg.run_cw_flow_m3h = c_sup, c_ret, c_flow
+                st.session_state.audit_cfg.run_chw_head_m, st.session_state.audit_cfg.run_cw_head_m, st.session_state.audit_cfg.run_ct_fan_kw = h_chw, h_cw, ct_fan
+                st.success("Audit locked! ✅")
 
-        # Auto-Calc Display
         dt = max(1.0, st.session_state.audit_cfg.run_chw_ret_c - st.session_state.audit_cfg.run_chw_sup_c)
         op_tr = calc_tr(st.session_state.audit_cfg.run_chw_flow_m3h, dt)
         p_kw = calc_pump_kw(st.session_state.audit_cfg.run_chw_flow_m3h, st.session_state.audit_cfg.run_chw_head_m)
@@ -128,16 +119,13 @@ with t2:
     st.header("📊 Interactive Load & Tariff Matrices")
     st.session_state.df_24h = st.data_editor(st.session_state.df_24h, num_rows="fixed", use_container_width=True, hide_index=True)
 
-# Function to render detailed hourly dataframes
 def render_output_tab(data_dict, title_prefix, curr):
-    st.header(f"{title_prefix}")
+    st.header(title_prefix)
     c1, c2, c3 = st.columns(3)
     c1.metric("Turnkey CAPEX", format_currency(data_dict['capex'], curr))
     c2.metric("Annual OPEX", format_currency(data_dict['opex'], curr))
-    if 'sav' in data_dict:
-        c3.metric("Annual Savings", format_currency(data_dict['sav'], curr), delta=f"Payback: {data_dict['pb']:.2f} Yrs")
-    else:
-        c3.metric("Status", "Audited Baseline")
+    if 'sav' in data_dict: c3.metric("Annual Savings", format_currency(data_dict['sav'], curr), delta=f"Payback: {data_dict['pb']:.2f} Yrs")
+    else: c3.metric("Status", "Baseline Configuration")
         
     st.markdown("#### ⚡ Granular Hourly Equipment Matrix")
     sim = data_dict['sim']
@@ -171,3 +159,16 @@ with t5:
     if st.session_state.opt_results:
         res = st.session_state.opt_results['s']
         render_output_tab(res, f"🌊 Stratified TES Optimum ({res['tes_trh']:.0f} TRh)", st.session_state.proj_cfg.currency)
+
+with t6:
+    if st.session_state.opt_results:
+        res = st.session_state.opt_results
+        curr = st.session_state.proj_cfg.currency
+        st.header("💰 Executive Economics & Breakdown")
+        df_bk = pd.DataFrame({
+            "Item": list(res['c']['bk'].keys()),
+            "Baseline": [format_currency(v, curr) for v in res['c']['bk'].values()],
+            "PCM TES Opt.": [format_currency(v, curr) for v in res['p']['bk'].values()],
+            "Strat. TES Opt.": [format_currency(v, curr) for v in res['s']['bk'].values()]
+        })
+        st.table(df_bk)
