@@ -17,8 +17,8 @@ def fetch_live_currency_rates() -> dict:
                 "AED (د.إ)": {"rate": r.get("AED", 0.044), "symbol": "AED", "unit": "M", "div": 1e6},
                 "MYR (RM)": {"rate": r.get("MYR", 0.053), "symbol": "RM", "unit": "M", "div": 1e6}
             }
-    except Exception as e:
-        pass # Graceful fail to default schema multipliers
+    except Exception:
+        pass
     return CURRENCY_MULTIPLIERS
 
 def format_currency(value_inr: float, currency_str: str, live_rates=None) -> str:

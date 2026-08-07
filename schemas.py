@@ -2,7 +2,7 @@
 Cooling Energy Transition Platform (CETP) - Data Contracts & Schemas
 File: schemas.py
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from enum import Enum
 
 CURRENCY_MULTIPLIERS = {
@@ -17,35 +17,14 @@ class ScopeEnum(str, Enum):
     GREENFIELD = "Greenfield"
     BROWNFIELD = "Brownfield (Retrofit)"
 
-class SectorEnum(str, Enum):
-    PHARMA = "Pharmaceutical"
-    DATA_CENTRE = "Data Centre"
-    FMCG = "FMCG"
-    AUTO = "Auto"
-    COMMERCIAL = "Commercial"
-
-class ChillerTypeEnum(str, Enum):
-    WC_CENTRIFUGAL = "Water-Cooled Centrifugal"
-    WC_VFD_SCREW = "Water-Cooled VFD Screw"
-    AC_VFD = "Air-Cooled VFD"
-    BRINE_GLYCOL = "Sub-Zero Brine Chiller"
-
 class ProjectConfig(BaseModel):
     project_name: str = "Mondelez 3017 TRh Retrofit"
     location: str = "Gurugram, HR"
-    sector: SectorEnum = SectorEnum.FMCG
-    scope: ScopeEnum = ScopeEnum.BROWNFIELD
+    scope: str = ScopeEnum.BROWNFIELD.value
     currency: str = "INR (₹)"
     peak_tr: float = 2794.18
 
-class ThermoConfig(BaseModel):
-    chw_supply_c: float = 7.0
-    chw_return_c: float = 14.0
-    brine_supply_c: float = -5.5
-    phe_pinch_c: float = 1.5
-
 class AuditConfig(BaseModel):
-    # Measured running parameters for Brownfield Thermodynamics
     run_chw_sup_c: float = 8.0
     run_chw_ret_c: float = 12.0
     run_chw_flow_m3h: float = 500.0
@@ -55,7 +34,6 @@ class AuditConfig(BaseModel):
     run_cw_flow_m3h: float = 600.0
     run_cw_head_m: float = 25.0
     run_ct_fan_kw: float = 45.0
-    pump_efficiency: float = 0.75
 
 class FinancialConfig(BaseModel):
     base_chiller_rate: float = 22000.0
@@ -64,3 +42,5 @@ class FinancialConfig(BaseModel):
     stratified_tes_rate: float = 18000.0
     dg_set_rate: float = 12500.0
     indirects_pct: float = 0.30
+    dg_diesel_cost_kwh: float = 24.50
+    daily_outage_hrs: float = 1.5

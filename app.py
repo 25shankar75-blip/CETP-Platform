@@ -8,10 +8,10 @@ import pandas as pd
 import json
 
 from schemas import CURRENCY_MULTIPLIERS, ProjectConfig, AuditConfig, FinancialConfig
-from physics_engine import calc_tr, calc_pump_kw, expand_24_to_8760
-from financial_engine import format_currency
+from physics_engine import calc_tr, calc_pump_kw, expand_24_to_8760, fetch_live_weather_wbt
+from financial_engine import fetch_live_currency_rates, format_currency
 from optimizer import optimize_plant
-# from report_generator import generate_pdf_report, generate_word_report # Uncomment when needed
+from report_generator import generate_pdf_report, generate_word_report 
 
 st.set_page_config(page_title="CETP Digital Twin", page_icon="❄️", layout="wide")
 st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color: #1e3d59; margin-bottom: 0px; } .sub-header { font-size: 1.05rem; font-weight: 500; color: #438a5e; margin-bottom: 18px; }</style>""", unsafe_allow_html=True)
@@ -59,13 +59,13 @@ if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use
         st.session_state.chiller_fleet, 
         st.session_state.df_24h["Load (TR)"].values, 
         st.session_state.df_24h["Tariff"].values, 
-        st.session_state.proj_cfg.scope.value, 
+        st.session_state.proj_cfg.scope, 
         audit_dict, rates_dict
     )
     st.sidebar.success("Optimization Complete! ✅ Check Output Tabs.")
 
 # --- MASTER TABS ---
-t1, t2, t3, t4, t5, t6 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials"])
+t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials & Exec Summary", "📄 Report"])
 
 with t1:
     st.subheader("Global Settings")
@@ -134,11 +134,11 @@ def render_output_tab(data_dict, title_prefix, curr):
         "Cooling TR": sim["cooling_tr"],
         "Charge TR": sim["charge_tr"],
         "Discharge TR": sim["discharge_tr"],
-        "Compressors (kW)": sim["comp_kw"],
-        "CHW Pumps (kW)": sim["chw_pump_kw"],
-        "CW Pumps (kW)": sim["cw_pump_kw"],
-        "CT Fans (kW)": sim["ct_fan_kw"],
-        "Total Demand (kW)": sim["total_kw"],
+        "Chiller (kW)": sim["comp_kw"],
+        "CHW Pump (kW)": sim["chw_pump_kw"],
+        "CT Pump (kW)": sim["cw_pump_kw"],
+        "CT Fan (kW)": sim["ct_fan_kw"],
+        "Total (kW)": sim["total_kw"],
         "Tariff (₹)": sim["tariff"],
         "Hourly Cost": sim["hourly_cost"]
     })
@@ -172,3 +172,11 @@ with t6:
             "Strat. TES Opt.": [format_currency(v, curr) for v in res['s']['bk'].values()]
         })
         st.table(df_bk)
+
+with t7:
+    if st.session_state.opt_results:
+        c1, c2 = st.columns(2)
+        curr = st.session_state.proj_cfg.currency
+        res = st.session_state.opt_results
+        c1.download_button("📥 Export PDF Report", data=generate_pdf_report(st.session_state.proj_cfg.project_name, st.session_state.proj_cfg.location, st.session_state.proj_cfg.scope, curr, res), file_name="CETP.pdf")
+        c2.download_button("📥 Export Word Report", data=generate_word_report(st.session_state.proj_cfg.project_name, st.session_state.proj_cfg.location, st.session_state.proj_cfg.scope, curr, res), file_name="CETP.docx")
