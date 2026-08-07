@@ -1,5 +1,5 @@
 """
-Cooling Energy Transition Platform (CETP) - Report Generator
+Cooling Energy Transition Platform (CETP) - Executive PDF & Word Export Engine
 File: report_generator.py
 """
 import io

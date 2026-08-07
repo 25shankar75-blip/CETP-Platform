@@ -1,5 +1,5 @@
 """
-CETP Digital Twin - Master Streamlit Frontend
+Cooling Energy Transition Platform (CETP) - Master Streamlit Frontend
 File: app.py
 """
 import streamlit as st
@@ -28,8 +28,8 @@ if "df_24h" not in st.session_state:
     })
 if "chiller_fleet" not in st.session_state:
     st.session_state.chiller_fleet = pd.DataFrame([
-        {"Capacity (TR)": 1000.0, "Quantity": 2, "Chiller Type": "Water-Cooled Centrifugal", "ikW/TR": 0.62},
-        {"Capacity (TR)": 800.0, "Quantity": 1, "Chiller Type": "Water-Cooled VFD Screw", "ikW/TR": 0.65}
+        {"Capacity (TR)": 1000.0, "Quantity": 2, "Chiller Type": "Water-Cooled Centrifugal", "ikW/TR": 0.62, "Standby": False},
+        {"Capacity (TR)": 800.0, "Quantity": 1, "Chiller Type": "Water-Cooled VFD Screw", "ikW/TR": 0.65, "Standby": True}
     ])
 if "proj_cfg" not in st.session_state: st.session_state.proj_cfg = ProjectConfig()
 if "audit_cfg" not in st.session_state: st.session_state.audit_cfg = AuditConfig()
@@ -49,20 +49,19 @@ if uploaded_file:
         st.session_state.chiller_fleet = pd.DataFrame(data["chiller_fleet"])
         st.sidebar.success("Scenario Restored! ✅")
     except Exception:
-        st.sidebar.error("Invalid format")
+        st.sidebar.error("Invalid scenario file format")
 
 scenario_data = {"df_24h": st.session_state.df_24h.to_dict(), "chiller_fleet": st.session_state.chiller_fleet.to_dict()}
 st.sidebar.download_button("💾 Save Project (.json)", json.dumps(scenario_data), "CETP_Scenario.json", "application/json", use_container_width=True)
 
 st.sidebar.markdown("---")
-# EXPLICIT RUN BUTTON
 if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use_container_width=True):
     rates_dict = st.session_state.fin_cfg.dict()
     audit_dict = st.session_state.audit_cfg.dict()
     
-    # Live Weather Fetch for Precise kWh calculation
+    # Fetch Weather Data
     wbt_data = fetch_live_weather_wbt(st.session_state.proj_cfg.location)
-    wbt_arr = wbt_data["dbt"] if wbt_data["status"] == "FALLBACK" else wbt_data["wbt"]
+    wbt_arr = wbt_data["wbt"]
 
     st.session_state.opt_results = optimize_plant(
         st.session_state.chiller_fleet, 
@@ -77,20 +76,22 @@ if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use
     if wbt_data["status"] == "LIVE":
         st.sidebar.success(f"Live Weather fetched for {st.session_state.proj_cfg.location}! Optimization Complete.")
     else:
-        st.sidebar.success("Optimization Complete! (Synthetic Weather Used)")
+        st.sidebar.success("Optimization Complete! (Synthetic Weather Model Used)")
 
 # --- MASTER TABS ---
-t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Financials & Exec", "📄 Export"])
+t1, t2, t3, t4, t5, t6, t7 = st.tabs(["🎛️ Setup & Audit", "📊 Load & Tariffs", "🏭 Baseline Output", "🧊 PCM TES Output", "🌊 Stratified TES Output", "💰 Executive Summary", "📄 Export"])
 
 with t1:
     st.subheader("Global Settings")
     c1, c2, c3 = st.columns(3)
     st.session_state.proj_cfg.project_name = c1.text_input("Project Name", st.session_state.proj_cfg.project_name)
-    st.session_state.proj_cfg.scope = c2.selectbox("Project Scope", ["Greenfield", "Brownfield (Retrofit)"], index=1)
+    st.session_state.proj_cfg.scope = c2.selectbox("Project Scope", [ScopeEnum.GREENFIELD.value, ScopeEnum.BROWNFIELD.value], index=1 if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value else 0)
     st.session_state.proj_cfg.currency = c3.selectbox("Currency", list(CURRENCY_MULTIPLIERS.keys()))
     st.session_state.proj_cfg.running_days = c1.number_input("Annual Running Days", value=st.session_state.proj_cfg.running_days, min_value=1, max_value=365)
+    st.session_state.audit_cfg.water_cost_per_m3 = c2.number_input("Water Cost (₹/m³)", value=st.session_state.audit_cfg.water_cost_per_m3)
+    st.session_state.fin_cfg.daily_outage_hrs = c3.number_input("Daily Power Outage (Hrs)", value=st.session_state.fin_cfg.daily_outage_hrs)
 
-    if st.session_state.proj_cfg.scope == "Brownfield (Retrofit)":
+    if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
         st.markdown("---")
         st.header("🔍 Retrofit Audit (Thermodynamic Restoration Engine)")
         st.info("Inputs actual running data. Engine auto-calculates inefficiencies and generates Dual-Benefit Savings (Restoration + Tariff Arbitrage).")
@@ -128,19 +129,32 @@ with t1:
         m3.metric("Baseline Inefficiency", f"{act_kw_tr:.3f} kW/TR", delta="Low Delta-T Syndrome", delta_color="inverse")
 
     st.markdown("---")
-    st.subheader("🏭 Installed / Proposed Chiller Fleet")
+    st.subheader("🏭 Installed / Proposed Chiller Fleet Array")
+    
+    # Array calculations
+    active_fleet = st.session_state.chiller_fleet[st.session_state.chiller_fleet["Standby"] == False] if "Standby" in st.session_state.chiller_fleet.columns else st.session_state.chiller_fleet
+    tot_chiller_tr = sum(st.session_state.chiller_fleet["Capacity (TR)"] * st.session_state.chiller_fleet["Quantity"])
+    tot_active_tr = sum(active_fleet["Capacity (TR)"] * active_fleet["Quantity"])
+    tot_ct_tr = tot_active_tr * 1.25 # Heat Rejection Factor
+    
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Total Installed Chiller Sizing", f"{tot_chiller_tr:.0f} TR")
+    a2.metric("Active Working Capacity", f"{tot_active_tr:.0f} TR")
+    a3.metric("Calculated Cooling Tower TR", f"{tot_ct_tr:.0f} CT-TR")
+
     st.session_state.chiller_fleet = st.data_editor(
         st.session_state.chiller_fleet, 
         num_rows="dynamic", 
         use_container_width=True,
         column_config={
             "Chiller Type": st.column_config.SelectboxColumn("Chiller Type", options=[t.value for t in ChillerTypeEnum], required=True),
-            "ikW/TR": st.column_config.NumberColumn("ikW/TR", min_value=0.1, max_value=3.0, format="%.2f", required=True)
+            "ikW/TR": st.column_config.NumberColumn("ikW/TR", min_value=0.1, max_value=3.0, format="%.2f", required=True),
+            "Standby": st.column_config.CheckboxColumn("Standby Chiller", default=False)
         }
     )
 
 with t2:
-    st.header("📊 Interactive Load & Tariff Matrices")
+    st.header("📊 Interactive Load & Tariff Profile")
     st.session_state.df_24h = st.data_editor(st.session_state.df_24h, num_rows="fixed", use_container_width=True, hide_index=True)
 
 def render_output_tab(data_dict, title_prefix, curr):
@@ -151,28 +165,31 @@ def render_output_tab(data_dict, title_prefix, curr):
     if 'sav' in data_dict: c3.metric("Annual Savings", format_currency(data_dict['sav'], curr), delta=f"Payback: {data_dict['pb']:.2f} Yrs")
     else: c3.metric("Status", "Baseline Configuration")
         
-    st.markdown("#### ⚡ Granular Hourly Equipment Matrix")
+    st.markdown("#### ⚡ Granular 11-Column Hourly Output Matrix")
     sim = data_dict['sim']
     df_out = pd.DataFrame({
         "Hour": np.arange(1, 25),
-        "Cooling TR": sim["cooling_tr"],
+        "Cooling Load (TR)": sim["cooling_tr"],
         "Charge TR": sim["charge_tr"],
         "Discharge TR": sim["discharge_tr"],
-        "Chiller kW": sim["comp_kw"],
-        "CHW Pump kW": sim["chw_pump_kw"],
-        "CW Pump kW": sim["cw_pump_kw"],
-        "CT Fan kW": sim["ct_fan_kw"],
-        "Total kW": sim["total_kw"],
-        "Tariff (₹)": sim["tariff"],
-        "Hourly Cost": sim["hourly_cost"]
+        "Base Chiller TR": sim["op_chiller_tr"],
+        "Loading Factor (%)": sim["loading_factor"],
+        "Compressors (kW)": sim["comp_kw"],
+        "CHW Pri Pumps (kW)": sim["chw_pri_kw"],
+        "CHW Sec Pumps (kW)": sim["chw_sec_kw"],
+        "CW Pumps (kW)": sim["cw_pump_kw"],
+        "CT Fans (kW)": sim["ct_fan_kw"],
+        "Total Demand (kW)": sim["total_kw"],
+        "ToU Tariff (₹)": sim["tariff"],
+        "Hourly OPEX (₹)": sim["hourly_cost"]
     })
     st.dataframe(df_out.round(2), use_container_width=True)
 
 with t3:
     if st.session_state.opt_results:
-        prefix = "🏭 Existing Retrofit Baseline (Inefficient)" if st.session_state.proj_cfg.scope == "Brownfield (Retrofit)" else "🏭 Conventional N+1 Baseline"
+        prefix = "🏭 Existing Retrofit Baseline (Inefficient)" if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value else "🏭 Conventional N+1 Baseline"
         render_output_tab(st.session_state.opt_results['c'], prefix, st.session_state.proj_cfg.currency)
-    else: st.info("Run Optimizer in the sidebar.")
+    else: st.info("Please click '▶️ Run Digital Twin Optimization' in the sidebar.")
 
 with t4:
     if st.session_state.opt_results: render_output_tab(st.session_state.opt_results['p'], f"🧊 PCM TES Optimum ({st.session_state.opt_results['p']['tes_trh']:.0f} TRh) - {st.session_state.opt_results['p'].get('num_tanks',1)} Tank(s)", st.session_state.proj_cfg.currency)
@@ -188,8 +205,87 @@ with t6:
         res = st.session_state.opt_results
         curr = st.session_state.proj_cfg.currency
         days = st.session_state.proj_cfg.running_days
-        st.header("💰 Executive Economics & OPEX Breakdown")
+        st.header("💰 Executive Summary & Financial Comparison")
         
+        # Side-by-side Technical Comparison Table
+        st.subheader("📊 Technical & Financial Master Comparison")
+        comp_summary = pd.DataFrame([
+            {
+                "Parameter": "Peak Load (TR)",
+                "Conventional / Existing": f"{st.session_state.proj_cfg.peak_tr:.1f} TR",
+                "PCM TES Option": f"{st.session_state.proj_cfg.peak_tr:.1f} TR",
+                "Stratified TES Option": f"{st.session_state.proj_cfg.peak_tr:.1f} TR"
+            },
+            {
+                "Parameter": "TES Capacity (TRh)",
+                "Conventional / Existing": "0 TRh",
+                "PCM TES Option": f"{res['p']['tes_trh']:.0f} TRh ({res['p']['num_tanks']} Tank)",
+                "Stratified TES Option": f"{res['s']['tes_trh']:.0f} TRh ({res['s']['num_tanks']} Tank)"
+            },
+            {
+                "Parameter": "Dual-Mode Brine Chiller Capacity",
+                "Conventional / Existing": "N/A",
+                "PCM TES Option": f"{res['p']['chiller_tr']:.0f} TR",
+                "Stratified TES Option": "N/A (Spare Fleet Charging)"
+            },
+            {
+                "Parameter": "Cooling Tower TR Required",
+                "Conventional / Existing": f"{st.session_state.proj_cfg.peak_tr * 1.25:.0f} CT-TR",
+                "PCM TES Option": f"{(st.session_state.proj_cfg.peak_tr - res['p']['chiller_tr']) * 1.25:.0f} CT-TR",
+                "Stratified TES Option": f"{st.session_state.proj_cfg.peak_tr * 1.1:.0f} CT-TR"
+            },
+            {
+                "Parameter": "Annual Water Consumption (m³)",
+                "Conventional / Existing": f"{res['c']['sim']['water_m3']:.0f} m³",
+                "PCM TES Option": f"{res['p']['sim']['water_m3']:.0f} m³",
+                "Stratified TES Option": f"{res['s']['sim']['water_m3']:.0f} m³"
+            },
+            {
+                "Parameter": "Annual DG Diesel Outage Cost",
+                "Conventional / Existing": format_currency(res['c']['dg_cost'], curr),
+                "PCM TES Option": format_currency(res['p']['dg_cost'], curr),
+                "Stratified TES Option": format_currency(res['s']['dg_cost'], curr)
+            },
+            {
+                "Parameter": "DG Grid Offsetting Savings",
+                "Conventional / Existing": "Baseline",
+                "PCM TES Option": format_currency(res['p']['grid_offset'], curr),
+                "Stratified TES Option": format_currency(res['s']['grid_offset'], curr)
+            },
+            {
+                "Parameter": "Turnkey CAPEX",
+                "Conventional / Existing": format_currency(res['c']['capex'], curr),
+                "PCM TES Option": format_currency(res['p']['capex'], curr),
+                "Stratified TES Option": format_currency(res['s']['capex'], curr)
+            },
+            {
+                "Parameter": "Total Annual OPEX (Power + Water + Diesel)",
+                "Conventional / Existing": format_currency(res['c']['opex'], curr),
+                "PCM TES Option": format_currency(res['p']['opex'], curr),
+                "Stratified TES Option": format_currency(res['s']['opex'], curr)
+            },
+            {
+                "Parameter": "Annual Net OPEX Savings",
+                "Conventional / Existing": "Baseline",
+                "PCM TES Option": format_currency(res['p']['sav'], curr),
+                "Stratified TES Option": format_currency(res['s']['sav'], curr)
+            },
+            {
+                "Parameter": "Simple Payback Period",
+                "Conventional / Existing": "N/A",
+                "PCM TES Option": f"{res['p']['pb']:.2f} Years",
+                "Stratified TES Option": f"{res['s']['pb']:.2f} Years"
+            },
+            {
+                "Parameter": "CO₂ Offset (Tonnes/Yr)",
+                "Conventional / Existing": "0.0 Tonnes",
+                "PCM TES Option": f"{res['p']['co2']:.1f} Tonnes/Yr",
+                "Stratified TES Option": f"{res['s']['co2']:.1f} Tonnes/Yr"
+            }
+        ])
+        st.table(comp_summary)
+
+        st.markdown("---")
         st.subheader("⚡ Annual OPEX Component Breakdown")
         opex_data = []
         for opt_name, k in [("Conventional Baseline", "c"), ("PCM TES Optimum", "p"), ("Stratified TES Optimum", "s")]:
@@ -197,20 +293,23 @@ with t6:
             opex_data.append({
                 "Option": opt_name,
                 "Chiller OPEX": format_currency(calc_annual_cost(sim["comp_kw"], sim["tariff"], days), curr),
-                "CHW Pumps OPEX": format_currency(calc_annual_cost(sim["chw_pump_kw"], sim["tariff"], days), curr),
+                "CHW Primary Pumps OPEX": format_currency(calc_annual_cost(sim["chw_pri_kw"], sim["tariff"], days), curr),
+                "CHW Secondary Pumps OPEX": format_currency(calc_annual_cost(sim["chw_sec_kw"], sim["tariff"], days), curr),
                 "CW Pumps OPEX": format_currency(calc_annual_cost(sim["cw_pump_kw"], sim["tariff"], days), curr),
                 "CT Fans OPEX": format_currency(calc_annual_cost(sim["ct_fan_kw"], sim["tariff"], days), curr),
-                "DG Outage Penalty": format_currency(res[k].get("dg_cost", 0.0), curr),
+                "Water OPEX": format_currency(res[k]["water_cost"], curr),
+                "DG Diesel OPEX": format_currency(res[k]["dg_cost"], curr),
                 "Total OPEX": format_currency(res[k]["opex"], curr)
             })
         st.table(pd.DataFrame(opex_data))
 
+        st.markdown("---")
         st.subheader("🏗️ CAPEX Breakup")
         df_bk = pd.DataFrame({
-            "Item": list(res['c']['bk'].keys()),
-            "Baseline": [format_currency(v, curr) for v in res['c']['bk'].values()],
-            "PCM TES Opt.": [format_currency(v, curr) for v in res['p']['bk'].values()],
-            "Strat. TES Opt.": [format_currency(v, curr) for v in res['s']['bk'].values()]
+            "Line Item": list(res['c']['bk'].keys()),
+            "Conventional Baseline": [format_currency(v, curr) for v in res['c']['bk'].values()],
+            "PCM TES Option": [format_currency(v, curr) for v in res['p']['bk'].values()],
+            "Stratified TES Option": [format_currency(v, curr) for v in res['s']['bk'].values()]
         })
         st.table(df_bk)
 
@@ -219,5 +318,5 @@ with t7:
         c1, c2 = st.columns(2)
         curr = st.session_state.proj_cfg.currency
         res = st.session_state.opt_results
-        c1.download_button("📥 Export PDF Report", data=generate_pdf_report(st.session_state.proj_cfg.project_name, st.session_state.proj_cfg.location, st.session_state.proj_cfg.scope, curr, res), file_name="CETP.pdf")
-        c2.download_button("📥 Export Word Report", data=generate_word_report(st.session_state.proj_cfg.project_name, st.session_state.proj_cfg.location, st.session_state.proj_cfg.scope, curr, res), file_name="CETP.docx")
+        c1.download_button("📥 Export PDF Executive Briefing", data=generate_pdf_report(st.session_state.proj_cfg.project_name, st.session_state.proj_cfg.location, st.session_state.proj_cfg.scope, curr, res), file_name=f"CETP_Report_{st.session_state.proj_cfg.project_name}.pdf")
+        c2.download_button("📥 Export Word Executive Briefing", data=generate_word_report(st.session_state.proj_cfg.project_name, st.session_state.proj_cfg.location, st.session_state.proj_cfg.scope, curr, res), file_name=f"CETP_Report_{st.session_state.proj_cfg.project_name}.docx")
