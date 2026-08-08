@@ -90,7 +90,9 @@ with t1:
     st.session_state.proj_cfg.currency = c3.selectbox("Currency", list(CURRENCY_MULTIPLIERS.keys()))
     st.session_state.proj_cfg.running_days = c1.number_input("Annual Running Days", value=st.session_state.proj_cfg.running_days, min_value=1, max_value=365)
     st.session_state.audit_cfg.water_cost_per_m3 = c2.number_input("Water Cost (₹/m³)", value=st.session_state.audit_cfg.water_cost_per_m3)
-    st.session_state.fin_cfg.daily_outage_hrs = c3.number_input("Daily Power Outage (Hrs)", value=st.session_state.fin_cfg.daily_outage_hrs)
+    
+    # Safe float mapping for the input
+    st.session_state.fin_cfg.daily_outage_hrs = float(c3.number_input("Daily Power Outage (Hrs)", value=float(st.session_state.fin_cfg.daily_outage_hrs)))
 
     if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
         st.markdown("---")

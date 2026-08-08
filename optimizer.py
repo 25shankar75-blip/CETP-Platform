@@ -55,7 +55,6 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     sim_conv = simulate_conventional(load_arr, tar_arr, wbt_arr, fleet_tr, proj_scope, audit_cfg, df_comp, running_days)
     cap_conv = build_capex_breakdown("Conventional", proj_scope, fleet_tr, 0, 0, rates, is_ac)
     
-    # Water Costs
     water_cost_conv = sim_conv["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
     sim_conv["annual_opex"] += water_cost_conv
     

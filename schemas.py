@@ -52,7 +52,6 @@ class AuditConfig(BaseModel):
     run_cw_head_m: float = 25.0
     run_ct_fan_kw: float = 45.0
     water_cost_per_m3: float = 65.0
-    daily_outage_hrs: float = 1.5
 
 class FinancialConfig(BaseModel):
     base_chiller_rate: float = 22000.0
@@ -65,4 +64,4 @@ class FinancialConfig(BaseModel):
     water_infra_rate: float = 1200.0
     indirects_pct: float = 0.30
     dg_diesel_cost_kwh: float = 24.50
-    daily_outage_hrs: float = 1.5  # Explicitly defined to prevent AttributeError
+    daily_outage_hrs: float = 1.5  # Fixed: Explicitly declared here
