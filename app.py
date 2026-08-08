@@ -13,12 +13,13 @@ from financial_engine import fetch_live_currency_rates, format_currency
 from optimizer import optimize_plant
 from report_generator import generate_pdf_report, generate_word_report 
 
+# System Page Configurations
 st.set_page_config(page_title="CETP Digital Twin", page_icon="❄️", layout="wide")
 st.markdown("""<style>.main-header { font-size: 2.2rem; font-weight: 800; color: #1e3d59; margin-bottom: 0px; } .sub-header { font-size: 1.05rem; font-weight: 500; color: #438a5e; margin-bottom: 18px; }</style>""", unsafe_allow_html=True)
 st.markdown('<p class="main-header">❄️ Cooling Energy Transition Platform (CETP)</p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">ASHRAE-Compliant, LEED Platinum-Grade Thermal Energy Storage Digital Twin</p>', unsafe_allow_html=True)
 
-# --- INITIALIZE STATE ---
+# --- INITIALIZE SESSION STATE ---
 if "df_24h" not in st.session_state:
     hours = np.arange(1, 25)
     loads = [1047.82]*8 + [1746.36]*2 + [2095.63]*2 + [2794.18]*4 + [2444.90]*4 + [2095.63]*2 + [1047.82]*2
@@ -49,7 +50,7 @@ if uploaded_file:
         st.session_state.chiller_fleet = pd.DataFrame(data["chiller_fleet"])
         st.sidebar.success("Scenario Restored! ✅")
     except Exception:
-        st.sidebar.error("Invalid format")
+        st.sidebar.error("Invalid format. Please upload a valid CETP JSON.")
 
 scenario_data = {"df_24h": st.session_state.df_24h.to_dict(), "chiller_fleet": st.session_state.chiller_fleet.to_dict()}
 st.sidebar.download_button("💾 Save Project (.json)", json.dumps(scenario_data), "CETP_Scenario.json", "application/json", use_container_width=True)
@@ -60,7 +61,6 @@ if st.sidebar.button("▶️ Run Digital Twin Optimization", type="primary", use
     rates_dict = st.session_state.fin_cfg.dict()
     audit_dict = st.session_state.audit_cfg.dict()
     
-    # Live Weather Geocoding Fetch
     wbt_data = fetch_live_weather_wbt(st.session_state.proj_cfg.location)
     wbt_arr = wbt_data["wbt"]
 
@@ -88,11 +88,11 @@ with t1:
     st.session_state.proj_cfg.project_name = c1.text_input("Project Name", st.session_state.proj_cfg.project_name)
     st.session_state.proj_cfg.scope = c2.selectbox("Project Scope", [ScopeEnum.GREENFIELD.value, ScopeEnum.BROWNFIELD.value], index=1 if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value else 0)
     st.session_state.proj_cfg.currency = c3.selectbox("Currency", list(CURRENCY_MULTIPLIERS.keys()))
+    
+    c1, c2, c3 = st.columns(3)
     st.session_state.proj_cfg.running_days = c1.number_input("Annual Running Days", value=st.session_state.proj_cfg.running_days, min_value=1, max_value=365)
     st.session_state.audit_cfg.water_cost_per_m3 = c2.number_input("Water Cost (₹/m³)", value=st.session_state.audit_cfg.water_cost_per_m3)
-    
-    # Safe float mapping for the input
-    st.session_state.fin_cfg.daily_outage_hrs = float(c3.number_input("Daily Power Outage (Hrs)", value=float(st.session_state.fin_cfg.daily_outage_hrs)))
+    st.session_state.fin_cfg.daily_outage_hrs = c3.number_input("Daily Power Outage (Hrs)", value=float(st.session_state.fin_cfg.daily_outage_hrs))
 
     if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
         st.markdown("---")
@@ -167,7 +167,7 @@ def render_output_tab(data_dict, title_prefix, curr):
     if 'sav' in data_dict: c3.metric("Annual Savings", format_currency(data_dict['sav'], curr), delta=f"Payback: {data_dict['pb']:.2f} Yrs")
     else: c3.metric("Status", "Baseline Configuration")
         
-    st.markdown("#### ⚡ Granular 11-Column Hourly Output Matrix")
+    st.markdown("#### ⚡ Granular 14-Column Hourly Output Matrix")
     sim = data_dict['sim']
     df_out = pd.DataFrame({
         "Hour": np.arange(1, 25),

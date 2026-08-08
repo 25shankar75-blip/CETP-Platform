@@ -31,13 +31,18 @@ def generate_pdf_report(p_name, loc, scope, curr, res):
         ]
         
         t = Table(data)
-        t.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.darkblue), ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke), ('GRID', (0,0), (-1,-1), 1, colors.black), ('ALIGN', (0,0), (-1,-1), 'CENTER')]))
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.darkblue), 
+            ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke), 
+            ('GRID', (0,0), (-1,-1), 1, colors.black), 
+            ('ALIGN', (0,0), (-1,-1), 'CENTER')
+        ]))
         story.append(t)
         doc.build(story)
         buf.seek(0)
         return buf.getvalue()
     except Exception:
-        return b"PDF Generation failed. Install reportlab."
+        return b"PDF Generation failed. Ensure 'reportlab' is installed on the deployment server."
 
 def generate_word_report(p_name, loc, scope, curr, res):
     try:
@@ -49,4 +54,4 @@ def generate_word_report(p_name, loc, scope, curr, res):
         buf.seek(0)
         return buf.getvalue()
     except Exception:
-        return b"Word Generation failed. Install python-docx."
+        return b"Word Generation failed. Ensure 'python-docx' is installed on the deployment server."

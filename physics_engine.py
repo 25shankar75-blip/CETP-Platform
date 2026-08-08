@@ -29,7 +29,7 @@ def fetch_live_weather_wbt(location_str: str) -> dict:
             w_data = json.loads(w_resp.read().decode())
             dbt = w_data["hourly"]["temperature_2m"][:24]
             rh = w_data["hourly"]["relative_humidity_2m"][:24]
-            # Stull WBT Approximation
+            # Stull WBT Approximation for cooling tower efficiency
             wbt = [
                 d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035 
                 for d, r in zip(dbt, rh)
@@ -70,6 +70,7 @@ def get_plv_kw_tr(load_factor, base_kw_tr=0.62, is_air_cooled=False, is_brine=Fa
     base = 0.85 if is_brine else base_kw_tr
     if is_air_cooled and not is_brine: base *= 1.35 
         
+    # Dynamic Part Load Curves
     if load_factor < 0.3: plv = 1.25
     elif load_factor < 0.5: plv = 1.10
     elif load_factor < 0.85: plv = 0.95
@@ -111,7 +112,7 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
             flow_ratio = max(0.4, lf)
             comp.append(tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h]))
             chw_pri.append(des_chw_kw * flow_ratio)
-            chw_sec.append(des_chw_kw * 0.4 * (flow_ratio ** 3))
+            chw_sec.append(des_chw_kw * 0.4 * (flow_ratio ** 3)) # Affinity laws
             cw.append(0.0 if is_ac else des_cw_kw * (flow_ratio ** 3))
             ct.append(0.0 if is_ac else des_ct_kw * flow_ratio)
             
