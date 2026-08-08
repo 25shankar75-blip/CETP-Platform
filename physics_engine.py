@@ -29,6 +29,7 @@ def fetch_live_weather_wbt(location_str: str) -> dict:
             w_data = json.loads(w_resp.read().decode())
             dbt = w_data["hourly"]["temperature_2m"][:24]
             rh = w_data["hourly"]["relative_humidity_2m"][:24]
+            # Stull WBT Approximation
             wbt = [
                 d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035 
                 for d, r in zip(dbt, rh)
