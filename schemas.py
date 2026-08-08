@@ -65,3 +65,4 @@ class FinancialConfig(BaseModel):
     water_infra_rate: float = 1200.0
     indirects_pct: float = 0.30
     dg_diesel_cost_kwh: float = 24.50
+    daily_outage_hrs: float = 1.5  # Explicitly defined to prevent AttributeError
