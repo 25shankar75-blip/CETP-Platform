@@ -11,7 +11,6 @@ def expand_24_to_8760(arr_24: np.ndarray) -> np.ndarray:
     return np.tile(arr_24, 365)
 
 def fetch_live_weather_wbt(location_str: str) -> dict:
-    """Geocodes location input and fetches Live Open-Meteo WBT and DBT."""
     try:
         safe_loc = urllib.parse.quote(location_str)
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={safe_loc}&count=1"
@@ -29,7 +28,6 @@ def fetch_live_weather_wbt(location_str: str) -> dict:
             w_data = json.loads(w_resp.read().decode())
             dbt = w_data["hourly"]["temperature_2m"][:24]
             rh = w_data["hourly"]["relative_humidity_2m"][:24]
-            # Stull WBT Approximation for cooling tower efficiency
             wbt = [
                 d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035 
                 for d, r in zip(dbt, rh)
@@ -70,7 +68,6 @@ def get_plv_kw_tr(load_factor, base_kw_tr=0.62, is_air_cooled=False, is_brine=Fa
     base = 0.85 if is_brine else base_kw_tr
     if is_air_cooled and not is_brine: base *= 1.35 
         
-    # Dynamic Part Load Curves
     if load_factor < 0.3: plv = 1.25
     elif load_factor < 0.5: plv = 1.10
     elif load_factor < 0.85: plv = 0.95
@@ -112,7 +109,7 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
             flow_ratio = max(0.4, lf)
             comp.append(tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h]))
             chw_pri.append(des_chw_kw * flow_ratio)
-            chw_sec.append(des_chw_kw * 0.4 * (flow_ratio ** 3)) # Affinity laws
+            chw_sec.append(des_chw_kw * 0.4 * (flow_ratio ** 3)) 
             cw.append(0.0 if is_ac else des_cw_kw * (flow_ratio ** 3))
             ct.append(0.0 if is_ac else des_ct_kw * flow_ratio)
             
@@ -127,6 +124,7 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
     }
 
 def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, fleet_df, running_days):
+    """Discharge logic: Spread over low-tariff hours first for max arbitrage, then peak load management."""
     comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
     storage = 0.0
     fleet_ikw = get_fleet_ikw(fleet_df)
@@ -136,9 +134,13 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
     des_cw_kw = get_design_pump_kw(fleet_tr, is_cw=True)
     des_ct_kw = 25.0 * (fleet_tr / 1000.0)
 
+    # 1. Identify low-tariff window for charging
     rolling_8 = [sum(tar_24[(i+j)%24] for j in range(8)) for i in range(24)]
     charge_hrs = [(np.argmin(rolling_8) + j)%24 for j in range(8)]
-    peak_hrs = np.argsort(tar_24)[::-1][:6]
+    
+    # 2. Sort remaining hours by highest tariff for prioritized discharge
+    non_charge_hrs = [h for h in range(24) if h not in charge_hrs]
+    discharge_hrs = sorted(non_charge_hrs, key=lambda h: tar_24[h], reverse=True)
     
     for h, tr in enumerate(load_24):
         c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
@@ -154,7 +156,7 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
             cw_k = 0.0 if is_ac else (des_cw_kw * (max(0.4, lf)**3)) + (get_design_pump_kw(charge_chiller_tr, True))
             ct_k = 0.0 if is_ac else (des_ct_kw * max(0.4, lf)) + 15.0
             op_tr_curr = tr
-        elif h in peak_hrs and storage > 0:
+        elif h in discharge_hrs[:8] and storage > 0: # Focus on top 8 most expensive hours
             d_tr = min(tr, storage)
             storage -= d_tr
             rem = tr - d_tr
@@ -196,6 +198,7 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
     }
 
 def simulate_stratified(load_24, tar_24, wbt_24, fleet_tr, tes_trh, fleet_df, running_days):
+    """Run Base TR at max load during lean hours. Discharge on highest tariff hours."""
     comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
     storage = 0.0
     fleet_ikw = get_fleet_ikw(fleet_df)
@@ -205,7 +208,8 @@ def simulate_stratified(load_24, tar_24, wbt_24, fleet_tr, tes_trh, fleet_df, ru
     des_cw_kw = get_design_pump_kw(fleet_tr, is_cw=True)
     des_ct_kw = 25.0 * (fleet_tr / 1000.0)
     
-    low_tar, peak_tar = np.percentile(tar_24, 40), np.percentile(tar_24, 75)
+    low_tar = np.percentile(tar_24, 40)
+    discharge_hrs = sorted([h for h in range(24)], key=lambda h: tar_24[h], reverse=True)[:8]
     
     for h, tr in enumerate(load_24):
         c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
@@ -223,7 +227,7 @@ def simulate_stratified(load_24, tar_24, wbt_24, fleet_tr, tes_trh, fleet_df, ru
             cw_k = 0.0 if is_ac else des_cw_kw * (max(0.4, lf)**3)
             ct_k = 0.0 if is_ac else des_ct_kw * max(0.4, lf)
             
-        elif tar_24[h] >= peak_tar and storage > 0:
+        elif h in discharge_hrs and storage > 0:
             d_tr = min(tr, storage)
             storage -= d_tr
             rem = tr - d_tr

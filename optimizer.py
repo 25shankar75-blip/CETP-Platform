@@ -8,13 +8,21 @@ from physics_engine import simulate_conventional, simulate_pcm, simulate_stratif
 def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, charge_chiller_tr, rates, is_air_cooled=False):
     """Generates precise equipment CAPEX line items, honoring Sunk Costs for Retrofits."""
     b = {
-        "Chiller Equip.": 0.0, "TES Tank": 0.0, "PCM Media": 0.0, "Pumps & PHE": 0.0, 
-        "Electrical": 0.0, "Water Infra": 0.0, "Transformer": 0.0, "DG Set": 0.0
+        "Chiller Equip.": 0.0, 
+        "TES Tank": 0.0, 
+        "PCM Media": 0.0, 
+        "Pumps & PHE": 0.0, 
+        "Electrical": 0.0, 
+        "Water Infra": 0.0, 
+        "Transformer": 0.0, 
+        "DG Set": 0.0,
+        "Indirects / AMC": 0.0  # Appended here to guarantee equal array length
     }
     
     if sys_type == "Conventional":
         if scope == "Brownfield (Retrofit)": 
-            return {"Total CAPEX": 0.0, "Breakdown": b}  # SUNK COST BASELINE LOCK
+            return {"Total CAPEX": 0.0, "Breakdown": b}  # Returns all 9 keys as 0.0
+            
         c_rate = rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0)
         b["Chiller Equip."] = fleet_tr * c_rate
         b["Pumps & PHE"] = 0.0 if is_air_cooled else fleet_tr * 2500.0
@@ -39,9 +47,11 @@ def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, charge_chiller_tr,
         b["Electrical"] = (tes_trh / 8.0) * 1000.0
         b["Water Infra"] = 0.0 if is_air_cooled else (tes_trh / 8.0) * rates.get("water_infra_rate", 1200.0)
 
-    subtotal = sum(b.values())
+    # Calculate Subtotal (excluding the 0.0 Indirects key just added)
+    subtotal = sum(v for k, v in b.items() if k != "Indirects / AMC")
     indirects = subtotal * rates.get("indirects_pct", 0.30)
     b["Indirects / AMC"] = indirects
+    
     return {"Total CAPEX": subtotal + indirects, "Breakdown": b}
 
 def eval_payback(capex_delta, opex_savings):
@@ -51,25 +61,23 @@ def eval_payback(capex_delta, opex_savings):
 def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, rates, running_days):
     """
     EOS-01 Compliant Optimizer: Evaluates 8760-hr OPEX dispatch before sizing hardware.
-    Iterates through storage capacities to find the global maximum OPEX savings limit < 4yr payback.
     """
     fleet_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
     is_ac = check_fleet_air_cooled(df_comp)
     
-    # 1. Baseline Simulation (Captures Audit Inefficiencies if Retrofit)
+    # 1. Baseline Simulation
     sim_conv = simulate_conventional(load_arr, tar_arr, wbt_arr, fleet_tr, proj_scope, audit_cfg, df_comp, running_days)
     cap_conv = build_capex_breakdown("Conventional", proj_scope, fleet_tr, 0, 0, rates, is_ac)
     
     water_cost_conv = sim_conv["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
     sim_conv["annual_opex"] += water_cost_conv
     
-    # Global Optimum Search Space
     search_space = np.linspace(500, max(load_arr)*12, 25)
     
-    # 2. Encapsulated PCM Optimization Loop
+    # 2. PCM Optimization Loop
     best_pcm = {"opex_savings": -1, "payback": 99}
     for trh in search_space:
-        c_tr = trh / 8.0  # 8-Hour strict charge window
+        c_tr = trh / 8.0  
         sim = simulate_pcm(load_arr, tar_arr, wbt_arr, fleet_tr, trh, c_tr, df_comp, running_days)
         cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates, is_ac)
         
@@ -86,7 +94,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
                 "opex_savings": sav, "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost
             }
             
-    if best_pcm["opex_savings"] == -1: # Fallback constraints
+    if best_pcm["opex_savings"] == -1: 
         trh, c_tr = 3017.0, 378.0
         sim = simulate_pcm(load_arr, tar_arr, wbt_arr, fleet_tr, trh, c_tr, df_comp, running_days)
         cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, c_tr, rates, is_ac)
@@ -115,7 +123,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
                 "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost
             }
             
-    if best_strat["opex_savings"] == -1: # Fallback constraints
+    if best_strat["opex_savings"] == -1: 
         trh = 2900.0
         sim = simulate_stratified(load_arr, tar_arr, wbt_arr, fleet_tr, trh, df_comp, running_days)
         cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates, is_ac)
@@ -127,8 +135,6 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
 
     # 4. Integrate DG Outage Diesel Penalties & Grid Offset
     dg_cost_baseline = rates.get("dg_diesel_cost_kwh", 24.50) * (np.mean(sim_conv["comp_kw"]) + np.mean(sim_conv["chw_pri_kw"]) + np.mean(sim_conv["chw_sec_kw"])) * rates.get("daily_outage_hrs", 1.5) * running_days
-    
-    # TES shifts major loads during outages, running only secondary pumps on DG
     dg_cost_tes_p = rates.get("dg_diesel_cost_kwh", 24.50) * (np.mean(best_pcm["sim"]["chw_sec_kw"])) * rates.get("daily_outage_hrs", 1.5) * running_days
     dg_cost_tes_s = rates.get("dg_diesel_cost_kwh", 24.50) * (np.mean(best_strat["sim"]["chw_sec_kw"])) * rates.get("daily_outage_hrs", 1.5) * running_days
     
@@ -146,7 +152,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     best_pcm["payback"] = eval_payback(best_pcm["cap"]["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (best_pcm["cap"]["Total CAPEX"] - cap_conv["Total CAPEX"]), best_pcm["opex_savings"])
     best_strat["payback"] = eval_payback(best_strat["cap"]["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (best_strat["cap"]["Total CAPEX"] - cap_conv["Total CAPEX"]), best_strat["opex_savings"])
 
-    # CO2 Emission Reduction (Grid Emission Factor: 0.82 kg CO2 / kWh)
+    # CO2 Emission Reduction
     co2_saved_p = ((sim_conv["annual_opex"] - best_pcm["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
     co2_saved_s = ((sim_conv["annual_opex"] - best_strat["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
 
