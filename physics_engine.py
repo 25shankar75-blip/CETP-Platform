@@ -7,10 +7,8 @@ import urllib.request
 import urllib.parse
 import json
 
-def expand_24_to_8760(arr_24: np.ndarray) -> np.ndarray:
-    return np.tile(arr_24, 365)
-
 def fetch_live_weather_wbt(location_str: str) -> dict:
+    """Geocodes location input and fetches Live Open-Meteo WBT and DBT."""
     try:
         safe_loc = urllib.parse.quote(location_str)
         geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={safe_loc}&count=1"
@@ -20,7 +18,7 @@ def fetch_live_weather_wbt(location_str: str) -> dict:
             if "results" in geo_data and len(geo_data["results"]) > 0:
                 lat, lon = geo_data["results"][0]["latitude"], geo_data["results"][0]["longitude"]
             else:
-                lat, lon = 28.4595, 77.0266  # Fallback Gurugram
+                lat, lon = 28.4595, 77.0266  
 
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m&forecast_days=1"
         w_req = urllib.request.Request(weather_url, headers={'User-Agent': 'Mozilla/5.0'})
@@ -44,12 +42,8 @@ def calc_tr(flow_m3h, dt_c, fluid="water"):
     return max(0.0, ((flow_m3h * rho / 3600.0) * cp * dt_c) / 3.51685)
 
 def calc_pump_kw(flow_m3h, head_m, eff=0.75):
+    if flow_m3h <= 0 or head_m <= 0: return 0.0
     return max(0.0, (9.81 * (flow_m3h * 1000.0 / 3600.0) * head_m) / (eff * 1000.0))
-
-def get_design_pump_kw(fleet_tr, is_cw=False):
-    dt_c = 5.0 if is_cw else 7.0 
-    flow_m3h = (fleet_tr * 3.51685 * 3600.0) / (4.186 * 1000.0 * dt_c)
-    return calc_pump_kw(flow_m3h, 25.0 if is_cw else 30.0)
 
 def get_fleet_ikw(fleet_df):
     if fleet_df.empty or "ikW/TR" not in fleet_df.columns: return 0.62
@@ -87,31 +81,30 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
     fleet_ikw = get_fleet_ikw(fleet_df)
     is_ac = check_fleet_air_cooled(fleet_df)
     
-    des_chw_kw = get_design_pump_kw(fleet_tr, is_cw=False)
-    des_cw_kw = get_design_pump_kw(fleet_tr, is_cw=True)
-    des_ct_kw = 25.0 * (fleet_tr / 1000.0)
-
-    if scope == "Brownfield (Retrofit)":
-        kw_chw_p = calc_pump_kw(audit_cfg.get("run_chw_flow_m3h", 500.0), audit_cfg.get("run_chw_head_m", 30.0))
-        kw_chw_s = kw_chw_p * 0.4
-        kw_cw = 0.0 if is_ac else calc_pump_kw(audit_cfg.get("run_cw_flow_m3h", 600.0), audit_cfg.get("run_cw_head_m", 25.0))
-        kw_ct = 0.0 if is_ac else audit_cfg.get("run_ct_fan_kw", 45.0)
+    # Exact Pump Extractions (Eliminating Phantom Pumps)
+    des_chw_p_kw = calc_pump_kw(audit_cfg.get("run_chw_flow_m3h", 500.0), audit_cfg.get("run_chw_head_m", 30.0))
+    des_chw_s_kw = calc_pump_kw(audit_cfg.get("run_sec_chw_flow_m3h", 0.0), audit_cfg.get("run_sec_chw_head_m", 0.0))
+    des_cw_kw = 0.0 if is_ac else calc_pump_kw(audit_cfg.get("run_cw_flow_m3h", 600.0), audit_cfg.get("run_cw_head_m", 25.0))
+    des_ct_kw = 0.0 if is_ac else audit_cfg.get("run_ct_fan_kw", 45.0)
 
     for h, tr in enumerate(load_24):
         charge.append(0.0); discharge.append(0.0); op_chiller_tr.append(tr)
         lf = min(1.0, tr / max(1.0, fleet_tr))
         loading_factor.append(lf * 100.0)
         
+        # Absolute 30% Minimum VFD constraint (prevents unrealistic 0 energy loops)
+        pump_lf = max(0.3, lf) 
+        
         if scope == "Brownfield (Retrofit)":
+            # Baseline reflects rigid historical operation
             comp.append(tr * fleet_ikw) 
-            chw_pri.append(kw_chw_p); chw_sec.append(kw_chw_s); cw.append(kw_cw); ct.append(kw_ct)
+            chw_pri.append(des_chw_p_kw); chw_sec.append(des_chw_s_kw); cw.append(des_cw_kw); ct.append(des_ct_kw)
         else:
-            flow_ratio = max(0.4, lf)
             comp.append(tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h]))
-            chw_pri.append(des_chw_kw * flow_ratio)
-            chw_sec.append(des_chw_kw * 0.4 * (flow_ratio ** 3)) 
-            cw.append(0.0 if is_ac else des_cw_kw * (flow_ratio ** 3))
-            ct.append(0.0 if is_ac else des_ct_kw * flow_ratio)
+            chw_pri.append(des_chw_p_kw * (pump_lf**3))
+            chw_sec.append(des_chw_s_kw * (pump_lf**3)) 
+            cw.append(des_cw_kw * (pump_lf**3))
+            ct.append(des_ct_kw * pump_lf)
             
     tot_kw = np.array(comp) + np.array(chw_pri) + np.array(chw_sec) + np.array(cw) + np.array(ct)
     water_m3 = calc_water_consumption_m3(np.array(op_chiller_tr), is_air_cooled=is_ac, running_days=running_days)
@@ -123,22 +116,22 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
         "annual_opex": np.sum(tot_kw * tar_24) * running_days, "water_m3": water_m3
     }
 
-def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, fleet_df, running_days):
-    """Discharge logic: Spread over low-tariff hours first for max arbitrage, then peak load management."""
+def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, fleet_df, audit_cfg, running_days):
     comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
     storage = 0.0
     fleet_ikw = get_fleet_ikw(fleet_df)
     is_ac = check_fleet_air_cooled(fleet_df)
     
-    des_chw_kw = get_design_pump_kw(fleet_tr, is_cw=False)
-    des_cw_kw = get_design_pump_kw(fleet_tr, is_cw=True)
-    des_ct_kw = 25.0 * (fleet_tr / 1000.0)
+    des_chw_p_kw = calc_pump_kw(audit_cfg.get("run_chw_flow_m3h", 500.0), audit_cfg.get("run_chw_head_m", 30.0))
+    des_chw_s_kw = calc_pump_kw(audit_cfg.get("run_sec_chw_flow_m3h", 0.0), audit_cfg.get("run_sec_chw_head_m", 0.0))
+    des_cw_kw = 0.0 if is_ac else calc_pump_kw(audit_cfg.get("run_cw_flow_m3h", 600.0), audit_cfg.get("run_cw_head_m", 25.0))
+    des_ct_kw = 0.0 if is_ac else audit_cfg.get("run_ct_fan_kw", 45.0)
 
-    # 1. Identify low-tariff window for charging
+    # Prioritize 8 lowest tariff hours for charging
     rolling_8 = [sum(tar_24[(i+j)%24] for j in range(8)) for i in range(24)]
     charge_hrs = [(np.argmin(rolling_8) + j)%24 for j in range(8)]
     
-    # 2. Sort remaining hours by highest tariff for prioritized discharge
+    # Priority OPEX Arbitrage: Discharge strictly starting at highest tariff hours
     non_charge_hrs = [h for h in range(24) if h not in charge_hrs]
     discharge_hrs = sorted(non_charge_hrs, key=lambda h: tar_24[h], reverse=True)
     
@@ -149,36 +142,42 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
             c_tr = charge_chiller_tr
             c_k += charge_chiller_tr * get_plv_kw_tr(1.0, 0.85, False, True, wbt_24[h])
             storage = min(tes_trh, storage + c_tr)
+            
             lf = tr / max(1.0, fleet_tr)
+            pump_lf = max(0.3, lf)
             c_k += tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_kw * max(0.4, lf)
-            chw_s_k = (des_chw_kw * 0.4 * (max(0.4, lf)**3)) + (get_design_pump_kw(charge_chiller_tr, False))
-            cw_k = 0.0 if is_ac else (des_cw_kw * (max(0.4, lf)**3)) + (get_design_pump_kw(charge_chiller_tr, True))
-            ct_k = 0.0 if is_ac else (des_ct_kw * max(0.4, lf)) + 15.0
+            
+            chw_p_k = des_chw_p_kw * (pump_lf**3)
+            chw_s_k = (des_chw_s_kw * (pump_lf**3)) + calc_pump_kw(charge_chiller_tr * 0.5, 30.0) # Dedicated charge pump logic
+            cw_k = 0.0 if is_ac else (des_cw_kw * (pump_lf**3)) + calc_pump_kw(charge_chiller_tr * 0.6, 25.0)
+            ct_k = 0.0 if is_ac else (des_ct_kw * pump_lf) + 15.0
             op_tr_curr = tr
-        elif h in discharge_hrs[:8] and storage > 0: # Focus on top 8 most expensive hours
+            
+        elif h in discharge_hrs and storage > 0: 
             d_tr = min(tr, storage)
             storage -= d_tr
             rem = tr - d_tr
             op_tr_curr = rem
             if rem > 0:
                 lf = rem / max(1.0, fleet_tr)
+                pump_lf = max(0.3, lf)
                 c_k += rem * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-                chw_p_k = des_chw_kw * max(0.4, lf)
-                chw_s_k = des_chw_kw * 0.4 * (max(0.4, lf)**3)
-                cw_k = 0.0 if is_ac else des_cw_kw * (max(0.4, lf)**3)
-                ct_k = 0.0 if is_ac else des_ct_kw * max(0.4, lf)
+                chw_p_k = des_chw_p_kw * (pump_lf**3)
+                chw_s_k = des_chw_s_kw * (pump_lf**3)
+                cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
+                ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
             else:
                 chw_p_k = 0.0
-                chw_s_k = des_chw_kw * 0.2
+                chw_s_k = des_chw_s_kw * (0.3**3)  # Only minimum secondary pumping required
                 cw_k, ct_k = 0.0, 0.0
         else:
             lf = tr / max(1.0, fleet_tr)
+            pump_lf = max(0.3, lf)
             c_k += tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_kw * max(0.4, lf)
-            chw_s_k = des_chw_kw * 0.4 * (max(0.4, lf)**3)
-            cw_k = 0.0 if is_ac else des_cw_kw * (max(0.4, lf)**3)
-            ct_k = 0.0 if is_ac else des_ct_kw * max(0.4, lf)
+            chw_p_k = des_chw_p_kw * (pump_lf**3)
+            chw_s_k = des_chw_s_kw * (pump_lf**3)
+            cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
+            ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
             op_tr_curr = tr
             
         lf_curr = op_tr_curr / max(1.0, fleet_tr)
@@ -197,59 +196,64 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
         "annual_opex": np.sum(tot_kw * tar_24) * running_days, "water_m3": water_m3
     }
 
-def simulate_stratified(load_24, tar_24, wbt_24, fleet_tr, tes_trh, fleet_df, running_days):
-    """Run Base TR at max load during lean hours. Discharge on highest tariff hours."""
+def simulate_stratified(load_24, tar_24, wbt_24, fleet_tr, tes_trh, fleet_df, audit_cfg, running_days):
     comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
     storage = 0.0
     fleet_ikw = get_fleet_ikw(fleet_df)
     is_ac = check_fleet_air_cooled(fleet_df)
     
-    des_chw_kw = get_design_pump_kw(fleet_tr, is_cw=False)
-    des_cw_kw = get_design_pump_kw(fleet_tr, is_cw=True)
-    des_ct_kw = 25.0 * (fleet_tr / 1000.0)
+    des_chw_p_kw = calc_pump_kw(audit_cfg.get("run_chw_flow_m3h", 500.0), audit_cfg.get("run_chw_head_m", 30.0))
+    des_chw_s_kw = calc_pump_kw(audit_cfg.get("run_sec_chw_flow_m3h", 0.0), audit_cfg.get("run_sec_chw_head_m", 0.0))
+    des_cw_kw = 0.0 if is_ac else calc_pump_kw(audit_cfg.get("run_cw_flow_m3h", 600.0), audit_cfg.get("run_cw_head_m", 25.0))
+    des_ct_kw = 0.0 if is_ac else audit_cfg.get("run_ct_fan_kw", 45.0)
     
     low_tar = np.percentile(tar_24, 40)
-    discharge_hrs = sorted([h for h in range(24)], key=lambda h: tar_24[h], reverse=True)[:8]
+    discharge_hrs = sorted([h for h in range(24)], key=lambda h: tar_24[h], reverse=True)
     
     for h, tr in enumerate(load_24):
         c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
         spare = max(0.0, fleet_tr - tr)
         
-        if tar_24[h] <= low_tar and spare > 50:
-            c_tr = min(spare, (tes_trh - storage)/2.0)
+        # Priority: Max Loading Capacity during Low Tariff
+        if tar_24[h] <= low_tar and spare > 0:
+            c_tr = min(spare, (tes_trh - storage))
             storage = min(tes_trh, storage + c_tr)
             tot_load = tr + c_tr
             op_tr_curr = tot_load
-            lf = tot_load / max(1.0, fleet_tr)
-            c_k = tot_load * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_kw * max(0.4, lf)
-            chw_s_k = des_chw_kw * 0.4 * (max(0.4, lf)**3)
-            cw_k = 0.0 if is_ac else des_cw_kw * (max(0.4, lf)**3)
-            ct_k = 0.0 if is_ac else des_ct_kw * max(0.4, lf)
             
-        elif h in discharge_hrs and storage > 0:
+            lf = tot_load / max(1.0, fleet_tr)
+            pump_lf = max(0.3, lf)
+            c_k = tot_load * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
+            chw_p_k = des_chw_p_kw * (pump_lf**3)
+            chw_s_k = des_chw_s_kw * (pump_lf**3)
+            cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
+            ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
+            
+        elif h in discharge_hrs[:8] and storage > 0:
             d_tr = min(tr, storage)
             storage -= d_tr
             rem = tr - d_tr
             op_tr_curr = rem
             if rem > 0:
                 lf = rem / max(1.0, fleet_tr)
+                pump_lf = max(0.3, lf)
                 c_k = rem * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-                chw_p_k = des_chw_kw * max(0.4, lf)
-                chw_s_k = des_chw_kw * 0.4 * (max(0.4, lf)**3)
-                cw_k = 0.0 if is_ac else des_cw_kw * (max(0.4, lf)**3)
-                ct_k = 0.0 if is_ac else des_ct_kw * max(0.4, lf)
+                chw_p_k = des_chw_p_kw * (pump_lf**3)
+                chw_s_k = des_chw_s_kw * (pump_lf**3)
+                cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
+                ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
             else:
                 chw_p_k = 0.0
-                chw_s_k = des_chw_kw * 0.2
+                chw_s_k = des_chw_s_kw * (0.3**3)
                 cw_k, ct_k = 0.0, 0.0
         else:
             lf = tr / max(1.0, fleet_tr)
+            pump_lf = max(0.3, lf)
             c_k = tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_kw * max(0.4, lf)
-            chw_s_k = des_chw_kw * 0.4 * (max(0.4, lf)**3)
-            cw_k = 0.0 if is_ac else des_cw_kw * (max(0.4, lf)**3)
-            ct_k = 0.0 if is_ac else des_ct_kw * max(0.4, lf)
+            chw_p_k = des_chw_p_kw * (pump_lf**3)
+            chw_s_k = des_chw_s_kw * (pump_lf**3)
+            cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
+            ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
             op_tr_curr = tr
             
         lf_curr = op_tr_curr / max(1.0, fleet_tr)
