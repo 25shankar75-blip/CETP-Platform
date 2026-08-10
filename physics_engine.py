@@ -225,6 +225,7 @@ def simulate_stratified(load_24, tar_24, wbt_24, active_fleet_tr, tes_trh, fleet
         c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
         spare = max(0.0, active_fleet_tr - tr)
         
+        # Priority: Max Loading Capacity during Low Tariff
         if tar_24[h] <= low_tar and spare > 0:
             c_tr = min(spare, (tes_trh - storage))
             storage = min(tes_trh, storage + c_tr)

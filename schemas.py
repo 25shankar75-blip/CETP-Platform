@@ -47,7 +47,7 @@ class ProjectConfig(BaseModel):
     running_days: int = 365
 
 class AuditConfig(BaseModel):
-    # Delta-T & Head (Applicable to both)
+    # Delta-T & Head (Applicable to both Greenfield and Retrofit)
     run_chw_sup_c: float = 8.0
     run_chw_ret_c: float = 12.0
     run_chw_head_m: float = 30.0
