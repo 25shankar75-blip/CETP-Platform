@@ -40,28 +40,26 @@ class ProjectConfig(BaseModel):
     project_name: str = "Mondelez 3017 TRh Plant"
     location: str = "Gurugram, HR"
     sector: str = SectorEnum.FMCG.value
-    scope: str = ScopeEnum.BROWNFIELD.value
+    scope: str = ScopeEnum.GREENFIELD.value
     currency: str = "INR (₹)"
     tank_shape: str = TankShapeEnum.CYLINDRICAL.value
     peak_tr: float = 2794.18
     running_days: int = 365
 
 class AuditConfig(BaseModel):
-    # Primary Pump inputs
+    # Delta-T & Head (Applicable to both)
     run_chw_sup_c: float = 8.0
     run_chw_ret_c: float = 12.0
-    run_chw_flow_m3h: float = 500.0
     run_chw_head_m: float = 30.0
-    
-    # Secondary Pump Inputs (0.0 defaults to explicitly prevent phantom sizing)
-    run_sec_chw_flow_m3h: float = 0.0
     run_sec_chw_head_m: float = 0.0
-    
-    # Condenser Loop
     run_cw_sup_c: float = 32.0
     run_cw_ret_c: float = 37.0
-    run_cw_flow_m3h: float = 600.0
     run_cw_head_m: float = 25.0
+    
+    # Flows & Fans (Only active for Retrofit Baseline)
+    run_chw_flow_m3h: float = 500.0
+    run_sec_chw_flow_m3h: float = 0.0
+    run_cw_flow_m3h: float = 600.0
     run_ct_fan_kw: float = 45.0
     water_cost_per_m3: float = 65.0
 
@@ -69,8 +67,8 @@ class FinancialConfig(BaseModel):
     base_chiller_rate: float = 22000.0
     ac_chiller_rate: float = 24000.0
     brine_chiller_rate: float = 25000.0
-    pcm_cyl_rate: float = 7800.0   # Shape-specific PCM pricing
-    pcm_rect_rate: float = 8300.0  # Shape-specific PCM pricing
+    pcm_cyl_rate: float = 7800.0
+    pcm_rect_rate: float = 8300.0
     stratified_tes_rate: float = 18000.0
     dg_set_rate: float = 12500.0
     transformer_rate: float = 3500.0

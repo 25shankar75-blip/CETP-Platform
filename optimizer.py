@@ -5,8 +5,8 @@ File: optimizer.py
 import numpy as np
 from physics_engine import simulate_conventional, simulate_pcm, simulate_stratified, check_fleet_air_cooled
 
-def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, costable_chiller_tr, rates, is_air_cooled=False, tank_shape="Cylindrical Tank"):
-    """Generates precise equipment CAPEX line items, honoring Sunk Costs and exactly 9 keys."""
+def build_capex_breakdown(sys_type, scope, active_tr, tes_trh, extra_chiller_tr, rates, is_air_cooled=False, tank_shape="Cylindrical Tank"):
+    """Generates precise equipment CAPEX line items, guaranteeing 9 keys."""
     b = {
         "Chiller Equip.": 0.0, 
         "TES Tank": 0.0, 
@@ -24,33 +24,36 @@ def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, costable_chiller_t
             return {"Total CAPEX": 0.0, "Breakdown": b}  
             
         c_rate = rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0)
-        b["Chiller Equip."] = fleet_tr * c_rate
-        b["Pumps & PHE"] = 0.0 if is_air_cooled else fleet_tr * 2500.0
-        b["Electrical"] = fleet_tr * 1500.0
-        b["Water Infra"] = 0.0 if is_air_cooled else fleet_tr * rates.get("water_infra_rate", 1200.0)
-        b["Transformer"] = fleet_tr * 0.8 * rates.get("transformer_rate", 3500.0)
-        b["DG Set"] = fleet_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
+        b["Chiller Equip."] = active_tr * c_rate
+        b["Pumps & PHE"] = 0.0 if is_air_cooled else active_tr * 2500.0
+        b["Electrical"] = active_tr * 1500.0
+        b["Water Infra"] = 0.0 if is_air_cooled else active_tr * rates.get("water_infra_rate", 1200.0)
+        b["Transformer"] = active_tr * 0.8 * rates.get("transformer_rate", 3500.0)
+        b["DG Set"] = active_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
         
     elif sys_type == "PCM":
-        b["Chiller Equip."] = costable_chiller_tr * rates.get("brine_chiller_rate", 25000.0)
+        b["Chiller Equip."] = (active_tr * (rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0))) if scope == "Greenfield" else 0.0
+        b["Chiller Equip."] += extra_chiller_tr * rates.get("brine_chiller_rate", 25000.0)
         
-        # Shape-Based Consolidation
         pcm_rate = rates.get("pcm_cyl_rate", 7800.0) if tank_shape == "Cylindrical Tank" else rates.get("pcm_rect_rate", 8300.0)
         b["TES Tank"] = tes_trh * pcm_rate 
         
-        b["Pumps & PHE"] = costable_chiller_tr * 3000.0
-        b["Electrical"] = costable_chiller_tr * 1500.0
-        b["Water Infra"] = 0.0 if is_air_cooled else costable_chiller_tr * rates.get("water_infra_rate", 1200.0)
-        b["Transformer"] = costable_chiller_tr * 0.8 * rates.get("transformer_rate", 3500.0)
-        b["DG Set"] = costable_chiller_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
+        cap_tr = active_tr + extra_chiller_tr
+        b["Pumps & PHE"] = cap_tr * 3000.0 if scope == "Greenfield" else extra_chiller_tr * 3000.0
+        b["Electrical"] = cap_tr * 1500.0 if scope == "Greenfield" else extra_chiller_tr * 1500.0
+        b["Water Infra"] = 0.0 if is_air_cooled else (cap_tr * rates.get("water_infra_rate", 1200.0) if scope == "Greenfield" else extra_chiller_tr * rates.get("water_infra_rate", 1200.0))
+        b["Transformer"] = cap_tr * 0.8 * rates.get("transformer_rate", 3500.0) if scope == "Greenfield" else extra_chiller_tr * 0.8 * rates.get("transformer_rate", 3500.0)
+        b["DG Set"] = cap_tr * 0.8 * rates.get("dg_set_rate", 12500.0) if scope == "Greenfield" else extra_chiller_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
         
     elif sys_type == "Stratified":
-        b["TES Tank"] = tes_trh * rates.get("stratified_tes_rate", 18000.0) * 0.75 
-        b["Pumps & PHE"] = (tes_trh / 8.0) * 1500.0
-        b["Electrical"] = (tes_trh / 8.0) * 1000.0
-        b["Water Infra"] = 0.0 if is_air_cooled else (tes_trh / 8.0) * rates.get("water_infra_rate", 1200.0)
+        b["Chiller Equip."] = (active_tr * (rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0))) if scope == "Greenfield" else 0.0
+        b["TES Tank"] = tes_trh * rates.get("stratified_tes_rate", 18000.0)
+        
+        cap_tr = active_tr + (tes_trh / 8.0)
+        b["Pumps & PHE"] = cap_tr * 1500.0 if scope == "Greenfield" else (tes_trh / 8.0) * 1500.0
+        b["Electrical"] = cap_tr * 1000.0 if scope == "Greenfield" else (tes_trh / 8.0) * 1000.0
+        b["Water Infra"] = 0.0 if is_air_cooled else (cap_tr * rates.get("water_infra_rate", 1200.0) if scope == "Greenfield" else (tes_trh / 8.0) * rates.get("water_infra_rate", 1200.0))
 
-    # Calculate Subtotal
     subtotal = sum(v for k, v in b.items() if k != "Indirects / AMC")
     indirects = subtotal * rates.get("indirects_pct", 0.30)
     b["Indirects / AMC"] = indirects
@@ -62,20 +65,20 @@ def eval_payback(capex_delta, opex_savings):
     return capex_delta / opex_savings
 
 def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, rates, running_days, tank_shape):
-    fleet_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
     is_ac = check_fleet_air_cooled(df_comp)
     
-    # Retrofit Sunk-Cost Interception for Brine Chillers
+    total_installed_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
+    active_df = df_comp[df_comp["Standby"] == False] if "Standby" in df_comp.columns else df_comp
+    active_working_tr = sum(active_df["Capacity (TR)"] * active_df["Quantity"]) if not active_df.empty else total_installed_tr
+
     existing_brine_tr = 0.0
     if proj_scope == "Brownfield (Retrofit)" and not df_comp.empty:
         brine_df = df_comp[df_comp["Chiller Type"].isin(["Sub-Zero Brine Chiller", "Dual-Mode Chiller"])]
-        if not brine_df.empty:
-            existing_brine_tr = sum(brine_df["Capacity (TR)"] * brine_df["Quantity"])
+        if not brine_df.empty: existing_brine_tr = sum(brine_df["Capacity (TR)"] * brine_df["Quantity"])
     
-    # 1. Baseline Simulation
-    sim_conv = simulate_conventional(load_arr, tar_arr, wbt_arr, fleet_tr, proj_scope, audit_cfg, df_comp, running_days)
-    cap_conv = build_capex_breakdown("Conventional", proj_scope, fleet_tr, 0, 0, rates, is_ac, tank_shape)
-    
+    # 1. Baseline Simulation (Uses Total Installed for CAPEX)
+    sim_conv = simulate_conventional(load_arr, tar_arr, wbt_arr, active_working_tr, proj_scope, audit_cfg, df_comp, running_days)
+    cap_conv = build_capex_breakdown("Conventional", proj_scope, total_installed_tr, 0, 0, rates, is_ac, tank_shape)
     water_cost_conv = sim_conv["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
     sim_conv["annual_opex"] += water_cost_conv
     
@@ -87,8 +90,8 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
         c_tr = trh / 8.0  
         new_c_tr = max(0.0, c_tr - existing_brine_tr) if proj_scope == "Brownfield (Retrofit)" else c_tr
         
-        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, fleet_tr, trh, c_tr, df_comp, audit_cfg, running_days)
-        cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, new_c_tr, rates, is_ac, tank_shape)
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, c_tr, df_comp, audit_cfg, running_days, proj_scope)
+        cap = build_capex_breakdown("PCM", proj_scope, active_working_tr, trh, new_c_tr, rates, is_ac, tank_shape)
         
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
@@ -98,16 +101,13 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
         pb = eval_payback(delta_c, sav)
         
         if pb <= 4.0 and sav > best_pcm["opex_savings"]:
-            best_pcm = {
-                "tes_trh": trh, "chiller_tr": c_tr, "new_chiller_tr": new_c_tr, "sim": sim, "cap": cap, 
-                "opex_savings": sav, "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost
-            }
+            best_pcm = {"tes_trh": trh, "chiller_tr": c_tr, "new_chiller_tr": new_c_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost}
             
     if best_pcm["opex_savings"] == -1: 
         trh, c_tr = 3017.0, 378.0
         new_c_tr = max(0.0, c_tr - existing_brine_tr) if proj_scope == "Brownfield (Retrofit)" else c_tr
-        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, fleet_tr, trh, c_tr, df_comp, audit_cfg, running_days)
-        cap = build_capex_breakdown("PCM", proj_scope, fleet_tr, trh, new_c_tr, rates, is_ac, tank_shape)
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, c_tr, df_comp, audit_cfg, running_days, proj_scope)
+        cap = build_capex_breakdown("PCM", proj_scope, active_working_tr, trh, new_c_tr, rates, is_ac, tank_shape)
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
@@ -117,8 +117,8 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     # 3. Stratified Chilled Water Optimization Loop
     best_strat = {"opex_savings": -1, "payback": 99}
     for trh in search_space:
-        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, fleet_tr, trh, df_comp, audit_cfg, running_days)
-        cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates, is_ac, tank_shape)
+        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        cap = build_capex_breakdown("Stratified", proj_scope, active_working_tr, trh, 0, rates, is_ac, tank_shape)
         
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
@@ -128,22 +128,19 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
         pb = eval_payback(delta_c, sav)
         
         if pb <= 4.0 and sav > best_strat["opex_savings"]:
-            best_strat = {
-                "tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, 
-                "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost
-            }
+            best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost}
             
     if best_strat["opex_savings"] == -1: 
         trh = 2900.0
-        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, fleet_tr, trh, df_comp, audit_cfg, running_days)
-        cap = build_capex_breakdown("Stratified", proj_scope, fleet_tr, trh, 0, rates, is_ac, tank_shape)
+        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        cap = build_capex_breakdown("Stratified", proj_scope, active_working_tr, trh, 0, rates, is_ac, tank_shape)
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
         sav = sim_conv["annual_opex"] - sim["annual_opex"]
         delta_c = cap["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
         best_strat = {"tes_trh": trh, "sim": sim, "cap": cap, "opex_savings": sav, "payback": eval_payback(delta_c, sav), "num_tanks": 1, "water_cost": w_cost}
 
-    # 4. Integrate DG Outage Diesel Penalties & Grid Offset
+    # 4. Outage Penalties
     dg_cost_baseline = rates.get("dg_diesel_cost_kwh", 24.50) * (np.mean(sim_conv["comp_kw"]) + np.mean(sim_conv["chw_pri_kw"]) + np.mean(sim_conv["chw_sec_kw"])) * rates.get("daily_outage_hrs", 1.5) * running_days
     dg_cost_tes_p = rates.get("dg_diesel_cost_kwh", 24.50) * (np.mean(best_pcm["sim"]["chw_sec_kw"])) * rates.get("daily_outage_hrs", 1.5) * running_days
     dg_cost_tes_s = rates.get("dg_diesel_cost_kwh", 24.50) * (np.mean(best_strat["sim"]["chw_sec_kw"])) * rates.get("daily_outage_hrs", 1.5) * running_days
@@ -162,7 +159,6 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     best_pcm["payback"] = eval_payback(best_pcm["cap"]["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (best_pcm["cap"]["Total CAPEX"] - cap_conv["Total CAPEX"]), best_pcm["opex_savings"])
     best_strat["payback"] = eval_payback(best_strat["cap"]["Total CAPEX"] if proj_scope == "Brownfield (Retrofit)" else (best_strat["cap"]["Total CAPEX"] - cap_conv["Total CAPEX"]), best_strat["opex_savings"])
 
-    # CO2 Emission Reduction
     co2_saved_p = ((sim_conv["annual_opex"] - best_pcm["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
     co2_saved_s = ((sim_conv["annual_opex"] - best_strat["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
 

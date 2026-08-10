@@ -96,7 +96,7 @@ with t1:
     st.session_state.proj_cfg.project_name = c1.text_input("Project Name", st.session_state.proj_cfg.project_name)
     st.session_state.proj_cfg.scope = c2.selectbox("Project Scope", [ScopeEnum.GREENFIELD.value, ScopeEnum.BROWNFIELD.value], index=1 if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value else 0)
     st.session_state.proj_cfg.currency = c3.selectbox("Currency", list(CURRENCY_MULTIPLIERS.keys()))
-    st.session_state.proj_cfg.tank_shape = c4.selectbox("Tank Geometry", [TankShapeEnum.CYLINDRICAL.value, TankShapeEnum.RECTANGULAR.value])
+    st.session_state.proj_cfg.tank_shape = c4.selectbox("PCM Tank Geometry", [TankShapeEnum.CYLINDRICAL.value, TankShapeEnum.RECTANGULAR.value])
     
     c1, c2, c3 = st.columns(3)
     st.session_state.proj_cfg.running_days = c1.number_input("Annual Running Days", value=st.session_state.proj_cfg.running_days, min_value=1, max_value=365)
@@ -104,33 +104,54 @@ with t1:
     st.session_state.fin_cfg.daily_outage_hrs = float(c3.number_input("Daily Power Outage (Hrs)", value=float(st.session_state.fin_cfg.daily_outage_hrs)))
 
     st.markdown("---")
+    st.subheader("💰 CAPEX Rate Inputs (Overrides)")
+    with st.expander("Expand to modify baseline hardware rates"):
+        r1, r2, r3 = st.columns(3)
+        st.session_state.fin_cfg.pcm_cyl_rate = r1.number_input("PCM Cylindrical Rate (₹/TRh)", value=st.session_state.fin_cfg.pcm_cyl_rate)
+        st.session_state.fin_cfg.pcm_rect_rate = r2.number_input("PCM Rectangular Rate (₹/TRh)", value=st.session_state.fin_cfg.pcm_rect_rate)
+        st.session_state.fin_cfg.stratified_tes_rate = r3.number_input("Stratified TES Rate (₹/TRh)", value=st.session_state.fin_cfg.stratified_tes_rate)
+
+    st.markdown("---")
     st.header("🔍 Hydraulic Input Suite")
-    st.info("Input exact Pump Flows and Heads. Leave Secondary Flow/Head at 0 if the plant operates on a Primary-Only loop.")
+    if st.session_state.proj_cfg.scope == ScopeEnum.GREENFIELD.value:
+        st.info("GREENFIELD MODE ACTIVE: Pump flows and kW will be autonomously calculated based on standard thermodynamics and the Chiller Array TR. Provide Delta-Ts and pump heads below.")
+    else:
+        st.warning("RETROFIT MODE ACTIVE: You must input the exact audited flows (m³/h). Leave Secondary Flow/Head at 0 if the plant operates on a Primary-Only loop.")
     
     with st.form("audit_form"):
         a1, a2, a3 = st.columns(3)
         st.markdown("#### Primary CHW Loop")
-        p_flow = a1.number_input("Primary CHW Flow (m³/h)", value=st.session_state.audit_cfg.run_chw_flow_m3h)
-        p_head = a2.number_input("Primary Pump Head (m)", value=st.session_state.audit_cfg.run_chw_head_m)
-        dt_sup = a1.number_input("CHW Supply (°C)", value=st.session_state.audit_cfg.run_chw_sup_c)
-        dt_ret = a2.number_input("CHW Return (°C)", value=st.session_state.audit_cfg.run_chw_ret_c)
+        p_head = a1.number_input("Primary Pump Head (m)", value=st.session_state.audit_cfg.run_chw_head_m)
+        dt_sup = a2.number_input("CHW Supply (°C)", value=st.session_state.audit_cfg.run_chw_sup_c)
+        dt_ret = a3.number_input("CHW Return (°C)", value=st.session_state.audit_cfg.run_chw_ret_c)
+        if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
+            p_flow = a1.number_input("Audited Primary CHW Flow (m³/h)", value=st.session_state.audit_cfg.run_chw_flow_m3h)
         
         st.markdown("#### Secondary CHW Loop")
-        s_flow = a1.number_input("Secondary CHW Flow (m³/h)", value=st.session_state.audit_cfg.run_sec_chw_flow_m3h)
-        s_head = a2.number_input("Secondary Pump Head (m)", value=st.session_state.audit_cfg.run_sec_chw_head_m)
+        s_head = a1.number_input("Secondary Pump Head (m)", value=st.session_state.audit_cfg.run_sec_chw_head_m)
+        if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
+            s_flow = a2.number_input("Audited Secondary CHW Flow (m³/h)", value=st.session_state.audit_cfg.run_sec_chw_flow_m3h)
         
         st.markdown("#### Condenser Water Loop")
-        c_flow = a3.number_input("CW Flow (m³/h)", value=st.session_state.audit_cfg.run_cw_flow_m3h)
-        c_head = a3.number_input("CW Pump Head (m)", value=st.session_state.audit_cfg.run_cw_head_m)
-        ct_fan = a3.number_input("CT Fan Power (kW)", value=st.session_state.audit_cfg.run_ct_fan_kw)
+        c_head = a1.number_input("CW Pump Head (m)", value=st.session_state.audit_cfg.run_cw_head_m)
+        c_sup = a2.number_input("CW Supply (°C)", value=st.session_state.audit_cfg.run_cw_sup_c)
+        c_ret = a3.number_input("CW Return (°C)", value=st.session_state.audit_cfg.run_cw_ret_c)
+        if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
+            c_flow = a1.number_input("Audited CW Flow (m³/h)", value=st.session_state.audit_cfg.run_cw_flow_m3h)
+            ct_fan = a2.number_input("Audited CT Fan Power (kW)", value=st.session_state.audit_cfg.run_ct_fan_kw)
         
-        if st.form_submit_button("Save Plant Thermodynamics", use_container_width=True):
-            st.session_state.audit_cfg.run_chw_flow_m3h, st.session_state.audit_cfg.run_chw_head_m = p_flow, p_head
-            st.session_state.audit_cfg.run_sec_chw_flow_m3h, st.session_state.audit_cfg.run_sec_chw_head_m = s_flow, s_head
-            st.session_state.audit_cfg.run_cw_flow_m3h, st.session_state.audit_cfg.run_cw_head_m = c_flow, c_head
+        if st.form_submit_button("Save Plant Hydraulics", use_container_width=True):
+            st.session_state.audit_cfg.run_chw_head_m = p_head
+            st.session_state.audit_cfg.run_sec_chw_head_m = s_head
+            st.session_state.audit_cfg.run_cw_head_m = c_head
             st.session_state.audit_cfg.run_chw_sup_c, st.session_state.audit_cfg.run_chw_ret_c = dt_sup, dt_ret
-            st.session_state.audit_cfg.run_ct_fan_kw = ct_fan
-            st.success("Thermodynamic & Hydraulic Data Locked! ✅")
+            st.session_state.audit_cfg.run_cw_sup_c, st.session_state.audit_cfg.run_cw_ret_c = c_sup, c_ret
+            if st.session_state.proj_cfg.scope == ScopeEnum.BROWNFIELD.value:
+                st.session_state.audit_cfg.run_chw_flow_m3h = p_flow
+                st.session_state.audit_cfg.run_sec_chw_flow_m3h = s_flow
+                st.session_state.audit_cfg.run_cw_flow_m3h = c_flow
+                st.session_state.audit_cfg.run_ct_fan_kw = ct_fan
+            st.success("Hydraulic Data Locked! ✅")
 
     st.markdown("---")
     st.subheader("🏭 Installed / Proposed Chiller Fleet Array")
@@ -140,7 +161,7 @@ with t1:
     tot_active_tr = sum(active_fleet["Capacity (TR)"] * active_fleet["Quantity"])
 
     a1, a2, a3 = st.columns(3)
-    a1.metric("Total Installed Chiller Sizing", f"{tot_chiller_tr:.0f} TR")
+    a1.metric("Total Installed Chiller Sizing (N+1)", f"{tot_chiller_tr:.0f} TR")
     a2.metric("Active Working Capacity", f"{tot_active_tr:.0f} TR")
 
     st.session_state.chiller_fleet = st.data_editor(
@@ -156,14 +177,13 @@ with t1:
 
 with t2:
     st.header("📊 Interactive Load & Tariff Profile")
-    st.info("Edit your hourly loads and tariffs below. Click 'Save Load Profile' to commit your changes to the engine without triggering a bug.")
+    st.info("Edit your hourly loads and tariffs below. Click 'Save Load Profile' to commit your changes without triggering UI refresh bugs.")
     
-    # Form Isolation to prevent double-entry / refresh bugs
     with st.form("load_profile_form"):
         edited_df = st.data_editor(st.session_state.df_24h, num_rows="fixed", use_container_width=True, hide_index=True)
         if st.form_submit_button("💾 Save Load & Tariff Profile", use_container_width=True):
             st.session_state.df_24h = edited_df
-            st.success("Profile saved successfully! You can now run the Digital Twin Optimization in the sidebar.")
+            st.success("Profile saved successfully! You can now run the Digital Twin Optimization.")
 
 def render_output_tab(data_dict, title_prefix, curr):
     st.header(title_prefix)
@@ -301,7 +321,6 @@ with t6:
         st.markdown("---")
         st.subheader("🏗️ CAPEX Breakup")
         
-        # Absolute Key-Mapping Safety Check to Prevent ValueErrors
         keys = ["Chiller Equip.", "TES Tank", "PCM Media", "Pumps & PHE", "Electrical", "Water Infra", "Transformer", "DG Set", "Indirects / AMC"]
         
         b_c = [format_currency(res['c']['bk'].get(k, 0.0), curr) for k in keys]
