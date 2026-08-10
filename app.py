@@ -105,11 +105,25 @@ with t1:
 
     st.markdown("---")
     st.subheader("💰 CAPEX Rate Inputs (Overrides)")
-    with st.expander("Expand to modify baseline hardware rates"):
+    with st.expander("Expand to modify baseline hardware & infrastructure rates"):
         r1, r2, r3 = st.columns(3)
-        st.session_state.fin_cfg.pcm_cyl_rate = r1.number_input("PCM Cylindrical Rate (₹/TRh)", value=st.session_state.fin_cfg.pcm_cyl_rate)
-        st.session_state.fin_cfg.pcm_rect_rate = r2.number_input("PCM Rectangular Rate (₹/TRh)", value=st.session_state.fin_cfg.pcm_rect_rate)
-        st.session_state.fin_cfg.stratified_tes_rate = r3.number_input("Stratified TES Rate (₹/TRh)", value=st.session_state.fin_cfg.stratified_tes_rate)
+        st.session_state.fin_cfg.base_chiller_rate = r1.number_input("Base Chiller Rate (₹/TR)", value=float(st.session_state.fin_cfg.base_chiller_rate))
+        st.session_state.fin_cfg.ac_chiller_rate = r2.number_input("Air-Cooled Chiller Rate (₹/TR)", value=float(st.session_state.fin_cfg.ac_chiller_rate))
+        st.session_state.fin_cfg.brine_chiller_rate = r3.number_input("Brine Chiller Rate (₹/TR)", value=float(st.session_state.fin_cfg.brine_chiller_rate))
+        
+        r1, r2, r3 = st.columns(3)
+        st.session_state.fin_cfg.pcm_cyl_rate = r1.number_input("PCM Cylindrical Rate (₹/TRh)", value=float(st.session_state.fin_cfg.pcm_cyl_rate))
+        st.session_state.fin_cfg.pcm_rect_rate = r2.number_input("PCM Rectangular Rate (₹/TRh)", value=float(st.session_state.fin_cfg.pcm_rect_rate))
+        st.session_state.fin_cfg.stratified_tes_rate = r3.number_input("Stratified TES Rate (₹/TRh)", value=float(st.session_state.fin_cfg.stratified_tes_rate))
+
+        r1, r2, r3 = st.columns(3)
+        st.session_state.fin_cfg.dg_set_rate = r1.number_input("DG Set Rate (₹/TR)", value=float(st.session_state.fin_cfg.dg_set_rate))
+        st.session_state.fin_cfg.transformer_rate = r2.number_input("Transformer Rate (₹/TR)", value=float(st.session_state.fin_cfg.transformer_rate))
+        st.session_state.fin_cfg.water_infra_rate = r3.number_input("Water Infra Rate (₹/TR)", value=float(st.session_state.fin_cfg.water_infra_rate))
+
+        r1, r2 = st.columns(2)
+        st.session_state.fin_cfg.indirects_pct = r1.number_input("Indirects / AMC (%)", value=float(st.session_state.fin_cfg.indirects_pct), step=0.01)
+        st.session_state.fin_cfg.dg_diesel_cost_kwh = r2.number_input("DG Diesel Cost (₹/kWh)", value=float(st.session_state.fin_cfg.dg_diesel_cost_kwh))
 
     st.markdown("---")
     st.header("🔍 Hydraulic Input Suite")
@@ -183,7 +197,7 @@ with t2:
         edited_df = st.data_editor(st.session_state.df_24h, num_rows="fixed", use_container_width=True, hide_index=True)
         if st.form_submit_button("💾 Save Load & Tariff Profile", use_container_width=True):
             st.session_state.df_24h = edited_df
-            st.success("Profile saved successfully! You can now run the Digital Twin Optimization.")
+            st.success("Profile saved successfully! You can now run the Digital Twin Optimization in the sidebar.")
 
 def render_output_tab(data_dict, title_prefix, curr):
     st.header(title_prefix)

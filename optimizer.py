@@ -19,8 +19,10 @@ def build_capex_breakdown(sys_type, scope, active_tr, tes_trh, extra_chiller_tr,
         "Indirects / AMC": 0.0  
     }
     
+    is_greenfield = scope != "Brownfield (Retrofit)"
+    
     if sys_type == "Conventional":
-        if scope == "Brownfield (Retrofit)": 
+        if not is_greenfield: 
             return {"Total CAPEX": 0.0, "Breakdown": b}  
             
         c_rate = rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0)
@@ -32,28 +34,34 @@ def build_capex_breakdown(sys_type, scope, active_tr, tes_trh, extra_chiller_tr,
         b["DG Set"] = active_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
         
     elif sys_type == "PCM":
-        b["Chiller Equip."] = (active_tr * (rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0))) if scope == "Greenfield" else 0.0
-        b["Chiller Equip."] += extra_chiller_tr * rates.get("brine_chiller_rate", 25000.0)
+        b["Chiller Equip."] = extra_chiller_tr * rates.get("brine_chiller_rate", 25000.0)
+        if is_greenfield:
+            b["Chiller Equip."] += active_tr * (rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0))
         
         pcm_rate = rates.get("pcm_cyl_rate", 7800.0) if tank_shape == "Cylindrical Tank" else rates.get("pcm_rect_rate", 8300.0)
         b["TES Tank"] = tes_trh * pcm_rate 
         
-        cap_tr = active_tr + extra_chiller_tr
-        b["Pumps & PHE"] = cap_tr * 3000.0 if scope == "Greenfield" else extra_chiller_tr * 3000.0
-        b["Electrical"] = cap_tr * 1500.0 if scope == "Greenfield" else extra_chiller_tr * 1500.0
-        b["Water Infra"] = 0.0 if is_air_cooled else (cap_tr * rates.get("water_infra_rate", 1200.0) if scope == "Greenfield" else extra_chiller_tr * rates.get("water_infra_rate", 1200.0))
-        b["Transformer"] = cap_tr * 0.8 * rates.get("transformer_rate", 3500.0) if scope == "Greenfield" else extra_chiller_tr * 0.8 * rates.get("transformer_rate", 3500.0)
-        b["DG Set"] = cap_tr * 0.8 * rates.get("dg_set_rate", 12500.0) if scope == "Greenfield" else extra_chiller_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
+        cap_tr = (active_tr + extra_chiller_tr) if is_greenfield else extra_chiller_tr
+        b["Pumps & PHE"] = cap_tr * 3000.0
+        b["Electrical"] = cap_tr * 1500.0
+        b["Water Infra"] = 0.0 if is_air_cooled else cap_tr * rates.get("water_infra_rate", 1200.0)
+        b["Transformer"] = cap_tr * 0.8 * rates.get("transformer_rate", 3500.0)
+        b["DG Set"] = cap_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
         
     elif sys_type == "Stratified":
-        b["Chiller Equip."] = (active_tr * (rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0))) if scope == "Greenfield" else 0.0
+        if is_greenfield:
+            b["Chiller Equip."] = active_tr * (rates.get("ac_chiller_rate", 24000.0) if is_air_cooled else rates.get("base_chiller_rate", 22000.0))
+            
         b["TES Tank"] = tes_trh * rates.get("stratified_tes_rate", 18000.0)
         
-        cap_tr = active_tr + (tes_trh / 8.0)
-        b["Pumps & PHE"] = cap_tr * 1500.0 if scope == "Greenfield" else (tes_trh / 8.0) * 1500.0
-        b["Electrical"] = cap_tr * 1000.0 if scope == "Greenfield" else (tes_trh / 8.0) * 1000.0
-        b["Water Infra"] = 0.0 if is_air_cooled else (cap_tr * rates.get("water_infra_rate", 1200.0) if scope == "Greenfield" else (tes_trh / 8.0) * rates.get("water_infra_rate", 1200.0))
+        cap_tr = (active_tr + (tes_trh / 8.0)) if is_greenfield else (tes_trh / 8.0)
+        b["Pumps & PHE"] = cap_tr * 1500.0
+        b["Electrical"] = cap_tr * 1000.0
+        b["Water Infra"] = 0.0 if is_air_cooled else cap_tr * rates.get("water_infra_rate", 1200.0)
+        b["Transformer"] = cap_tr * 0.8 * rates.get("transformer_rate", 3500.0)
+        b["DG Set"] = cap_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
 
+    # Calculate Subtotal
     subtotal = sum(v for k, v in b.items() if k != "Indirects / AMC")
     indirects = subtotal * rates.get("indirects_pct", 0.30)
     b["Indirects / AMC"] = indirects
