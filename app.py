@@ -158,11 +158,12 @@ with t2:
     st.header("📊 Interactive Load & Tariff Profile")
     st.info("Edit your hourly loads and tariffs below. Click 'Save Load Profile' to commit your changes to the engine without triggering a bug.")
     
+    # Form Isolation to prevent double-entry / refresh bugs
     with st.form("load_profile_form"):
         edited_df = st.data_editor(st.session_state.df_24h, num_rows="fixed", use_container_width=True, hide_index=True)
         if st.form_submit_button("💾 Save Load & Tariff Profile", use_container_width=True):
             st.session_state.df_24h = edited_df
-            st.success("Profile saved successfully! You can now run the Digital Twin Optimization.")
+            st.success("Profile saved successfully! You can now run the Digital Twin Optimization in the sidebar.")
 
 def render_output_tab(data_dict, title_prefix, curr):
     st.header(title_prefix)
@@ -259,10 +260,22 @@ with t6:
                 "Stratified TES Option": format_currency(res['s']['opex'], curr)
             },
             {
+                "Parameter": "Annual Net OPEX Savings",
+                "Conventional / Existing": "Baseline",
+                "PCM TES Option": format_currency(res['p']['sav'], curr),
+                "Stratified TES Option": format_currency(res['s']['sav'], curr)
+            },
+            {
                 "Parameter": "Simple Payback Period",
                 "Conventional / Existing": "N/A",
                 "PCM TES Option": f"{res['p']['pb']:.2f} Years",
                 "Stratified TES Option": f"{res['s']['pb']:.2f} Years"
+            },
+            {
+                "Parameter": "CO₂ Offset (Tonnes/Yr)",
+                "Conventional / Existing": "0.0 Tonnes",
+                "PCM TES Option": f"{res['p']['co2']:.1f} Tonnes/Yr",
+                "Stratified TES Option": f"{res['s']['co2']:.1f} Tonnes/Yr"
             }
         ])
         st.table(comp_summary)
@@ -289,7 +302,8 @@ with t6:
         st.subheader("🏗️ CAPEX Breakup")
         
         # Absolute Key-Mapping Safety Check to Prevent ValueErrors
-        keys = list(res['c']['bk'].keys())
+        keys = ["Chiller Equip.", "TES Tank", "PCM Media", "Pumps & PHE", "Electrical", "Water Infra", "Transformer", "DG Set", "Indirects / AMC"]
+        
         b_c = [format_currency(res['c']['bk'].get(k, 0.0), curr) for k in keys]
         b_p = [format_currency(res['p']['bk'].get(k, 0.0), curr) for k in keys]
         b_s = [format_currency(res['s']['bk'].get(k, 0.0), curr) for k in keys]

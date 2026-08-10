@@ -5,8 +5,8 @@ File: optimizer.py
 import numpy as np
 from physics_engine import simulate_conventional, simulate_pcm, simulate_stratified, check_fleet_air_cooled
 
-def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, charge_chiller_tr, rates, is_air_cooled=False, tank_shape="Cylindrical Tank"):
-    """Generates precise equipment CAPEX line items, honoring Sunk Costs for Retrofits and Tank Geometry."""
+def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, costable_chiller_tr, rates, is_air_cooled=False, tank_shape="Cylindrical Tank"):
+    """Generates precise equipment CAPEX line items, honoring Sunk Costs and exactly 9 keys."""
     b = {
         "Chiller Equip.": 0.0, 
         "TES Tank": 0.0, 
@@ -32,21 +32,19 @@ def build_capex_breakdown(sys_type, scope, fleet_tr, tes_trh, charge_chiller_tr,
         b["DG Set"] = fleet_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
         
     elif sys_type == "PCM":
-        b["Chiller Equip."] = charge_chiller_tr * rates.get("brine_chiller_rate", 25000.0)
+        b["Chiller Equip."] = costable_chiller_tr * rates.get("brine_chiller_rate", 25000.0)
         
-        # Shape-Based Consolidation (Tank + Insulation + PCM Media merged)
+        # Shape-Based Consolidation
         pcm_rate = rates.get("pcm_cyl_rate", 7800.0) if tank_shape == "Cylindrical Tank" else rates.get("pcm_rect_rate", 8300.0)
         b["TES Tank"] = tes_trh * pcm_rate 
-        # PCM Media left at 0.0 since it is bundled into the shape rate
         
-        b["Pumps & PHE"] = charge_chiller_tr * 3000.0
-        b["Electrical"] = charge_chiller_tr * 1500.0
-        b["Water Infra"] = 0.0 if is_air_cooled else charge_chiller_tr * rates.get("water_infra_rate", 1200.0)
-        b["Transformer"] = charge_chiller_tr * 0.8 * rates.get("transformer_rate", 3500.0)
-        b["DG Set"] = charge_chiller_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
+        b["Pumps & PHE"] = costable_chiller_tr * 3000.0
+        b["Electrical"] = costable_chiller_tr * 1500.0
+        b["Water Infra"] = 0.0 if is_air_cooled else costable_chiller_tr * rates.get("water_infra_rate", 1200.0)
+        b["Transformer"] = costable_chiller_tr * 0.8 * rates.get("transformer_rate", 3500.0)
+        b["DG Set"] = costable_chiller_tr * 0.8 * rates.get("dg_set_rate", 12500.0)
         
     elif sys_type == "Stratified":
-        # Stratified includes Tank, Insulation, and Radial Diffusers
         b["TES Tank"] = tes_trh * rates.get("stratified_tes_rate", 18000.0) * 0.75 
         b["Pumps & PHE"] = (tes_trh / 8.0) * 1500.0
         b["Electrical"] = (tes_trh / 8.0) * 1000.0
@@ -67,7 +65,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     fleet_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else max(load_arr) * 1.2
     is_ac = check_fleet_air_cooled(df_comp)
     
-    # Identify existing low-temp capacity for CAPEX deduction in Retrofits
+    # Retrofit Sunk-Cost Interception for Brine Chillers
     existing_brine_tr = 0.0
     if proj_scope == "Brownfield (Retrofit)" and not df_comp.empty:
         brine_df = df_comp[df_comp["Chiller Type"].isin(["Sub-Zero Brine Chiller", "Dual-Mode Chiller"])]

@@ -81,7 +81,7 @@ def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: d
     fleet_ikw = get_fleet_ikw(fleet_df)
     is_ac = check_fleet_air_cooled(fleet_df)
     
-    # Exact Pump Extractions (Eliminating Phantom Pumps)
+    # Exact Pump Extractions (Eliminating Phantom Pumps via 0.0 defaults)
     des_chw_p_kw = calc_pump_kw(audit_cfg.get("run_chw_flow_m3h", 500.0), audit_cfg.get("run_chw_head_m", 30.0))
     des_chw_s_kw = calc_pump_kw(audit_cfg.get("run_sec_chw_flow_m3h", 0.0), audit_cfg.get("run_sec_chw_head_m", 0.0))
     des_cw_kw = 0.0 if is_ac else calc_pump_kw(audit_cfg.get("run_cw_flow_m3h", 600.0), audit_cfg.get("run_cw_head_m", 25.0))
@@ -148,7 +148,7 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
             c_k += tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
             
             chw_p_k = des_chw_p_kw * (pump_lf**3)
-            chw_s_k = (des_chw_s_kw * (pump_lf**3)) + calc_pump_kw(charge_chiller_tr * 0.5, 30.0) # Dedicated charge pump logic
+            chw_s_k = (des_chw_s_kw * (pump_lf**3)) + calc_pump_kw(charge_chiller_tr * 0.5, 30.0) 
             cw_k = 0.0 if is_ac else (des_cw_kw * (pump_lf**3)) + calc_pump_kw(charge_chiller_tr * 0.6, 25.0)
             ct_k = 0.0 if is_ac else (des_ct_kw * pump_lf) + 15.0
             op_tr_curr = tr
@@ -168,7 +168,7 @@ def simulate_pcm(load_24, tar_24, wbt_24, fleet_tr, tes_trh, charge_chiller_tr, 
                 ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
             else:
                 chw_p_k = 0.0
-                chw_s_k = des_chw_s_kw * (0.3**3)  # Only minimum secondary pumping required
+                chw_s_k = des_chw_s_kw * (0.3**3)  
                 cw_k, ct_k = 0.0, 0.0
         else:
             lf = tr / max(1.0, fleet_tr)
