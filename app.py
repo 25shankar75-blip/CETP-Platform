@@ -341,7 +341,8 @@ with t6:
         st.markdown("---")
         st.subheader("🏗️ CAPEX Breakup")
         
-        keys = ["Chiller Equip.", "TES Tank", "PCM Media", "Pumps & PHE", "Electrical", "Water Infra", "Transformer", "DG Set", "Indirects / AMC"]
+        # EXACT 8-KEY CAPEX ALIGNMENT
+        keys = ["Chiller Equip.", "TES System", "Pumps & PHE", "Electrical", "Water Infra", "Transformer", "DG Set", "Indirects / AMC"]
         
         b_c = [format_currency(res['c']['bk'].get(k, 0.0), curr) for k in keys]
         b_p = [format_currency(res['p']['bk'].get(k, 0.0), curr) for k in keys]
