@@ -91,7 +91,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
 
     if is_greenfield:
         pcm_search_space = np.linspace(peak_load * 1.0, peak_load * 8, 25)
-        strat_search_space = np.linspace(peak_load * 1.0, peak_load * 4, 15) # Hard cap Stratified to max 4 hours to prevent physical impossibilities
+        strat_search_space = np.linspace(peak_load * 1.0, peak_load * 4, 15)
     else:
         max_retrofit_trh = max(500.0, avg_spare_capacity * 8.0) 
         pcm_search_space = np.linspace(500, max_retrofit_trh, 20)
@@ -100,12 +100,13 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     # 3. PCM Optimization
     best_pcm = {"opex_savings": -1, "payback": 99, "score": -9999}
     for trh in pcm_search_space:
-        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
-        base_chiller_tr = sim["base_chiller_tr"]
-        c_tr = sim["charge_chiller_tr"]
+        c_tr = trh / 8.0  
         new_c_tr = max(0.0, c_tr - existing_brine_tr) if not is_greenfield else c_tr
         
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, c_tr, df_comp, audit_cfg, running_days, proj_scope)
+        base_chiller_tr = sim["base_chiller_tr"]
         cap = build_capex_breakdown("PCM", proj_scope, base_chiller_tr, trh, new_c_tr, rates, is_ac, tank_shape)
+        
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
         
@@ -120,10 +121,10 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
             
     if best_pcm["opex_savings"] == -1: 
         trh = pcm_search_space[len(pcm_search_space)//2]
-        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
-        base_chiller_tr = sim["base_chiller_tr"]
-        c_tr = sim["charge_chiller_tr"]
+        c_tr = trh / 8.0
         new_c_tr = max(0.0, c_tr - existing_brine_tr) if not is_greenfield else c_tr
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, c_tr, df_comp, audit_cfg, running_days, proj_scope)
+        base_chiller_tr = sim["base_chiller_tr"]
         cap = build_capex_breakdown("PCM", proj_scope, base_chiller_tr, trh, new_c_tr, rates, is_ac, tank_shape)
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
@@ -136,8 +137,8 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     for trh in strat_search_space:
         sim = simulate_stratified(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
         base_chiller_tr = sim["base_chiller_tr"]
-        
         cap = build_capex_breakdown("Stratified", proj_scope, base_chiller_tr, trh, 0, rates, is_ac, tank_shape)
+        
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
         

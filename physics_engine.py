@@ -126,52 +126,67 @@ def simulate_conventional(load_24, tar_24, wbt_24, active_working_tr, scope, aud
         "hourly_cost": tot_kw * tar_24, "annual_opex": np.sum(tot_kw * tar_24) * running_days, "water_m3": water_m3
     }
 
-def simulate_pcm(load_24, tar_24, wbt_24, active_working_tr, tes_trh, fleet_df, audit_cfg, running_days, scope):
+def simulate_pcm(load_24, tar_24, wbt_24, active_working_tr, tes_trh, charge_chiller_tr, fleet_df, audit_cfg, running_days, scope):
     comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
     is_greenfield = scope != "Brownfield (Retrofit)"
     fleet_ikw = get_fleet_ikw(fleet_df)
     is_ac = check_fleet_air_cooled(fleet_df)
     peak_load = max(load_24)
 
-    # 1. Predictive BMS: Identify Charging Window
     rolling_8 = [sum(tar_24[(i+j)%24] for j in range(8)) for i in range(24)]
     charge_start_hr = np.argmin(rolling_8)
     charge_hrs = [(charge_start_hr + j)%24 for j in range(8)]
     non_charge_hrs = [h for h in range(24) if h not in charge_hrs]
     
-    # 2. Predictive BMS: Proportional Discharge Schedule
     discharge_schedule = [0.0] * 24
     storage_avail = tes_trh
-    unique_tariffs = sorted(list(set([tar_24[h] for h in non_charge_hrs])), reverse=True)
     
+    # STEP 1: Peak Shaving (Mandatory)
+    base_chiller_tr = active_working_tr
+    if is_greenfield:
+        target_base = peak_load
+        while target_base > peak_load * 0.30: 
+            needed = sum(max(0.0, load_24[h] - target_base) for h in non_charge_hrs)
+            if needed > tes_trh:
+                target_base += 10.0
+                break
+            target_base -= 10.0
+        base_chiller_tr = target_base
+
+    for h in non_charge_hrs:
+        if load_24[h] > base_chiller_tr:
+            shave = min(storage_avail, load_24[h] - base_chiller_tr)
+            discharge_schedule[h] = shave
+            storage_avail -= shave
+            
+    # STEP 2: OPEX Arbitrage (Shift to Highest Tariffs)
+    unique_tariffs = sorted(list(set([tar_24[h] for h in non_charge_hrs])), reverse=True)
     for tar in unique_tariffs:
         if storage_avail <= 0.01: break
         tier_hrs = [h for h in non_charge_hrs if tar_24[h] == tar]
-        total_tier_load = sum(load_24[h] for h in tier_hrs)
-        if total_tier_load > 0:
-            tier_storage = storage_avail
+        rem_loads = {h: max(0.0, load_24[h] - discharge_schedule[h]) for h in tier_hrs}
+        tot_tier_load = sum(rem_loads.values())
+        
+        if tot_tier_load > 0:
+            tier_storage = min(storage_avail, tot_tier_load)
             for h in tier_hrs:
-                proportion = load_24[h] / total_tier_load
-                alloc = min(load_24[h], tier_storage * proportion)
-                discharge_schedule[h] = alloc
+                alloc = tier_storage * (rem_loads[h] / tot_tier_load)
+                discharge_schedule[h] += alloc
                 storage_avail -= alloc
 
-    # 3. Dynamic Equipment Sizing Based on Perfect Schedule
-    total_discharge = sum(discharge_schedule)
-    charge_chiller_tr = total_discharge / len(charge_hrs) if len(charge_hrs) > 0 else 0.0
     charge_schedule = [charge_chiller_tr if h in charge_hrs else 0.0 for h in range(24)]
-
-    max_residual_load = max([load_24[h] - discharge_schedule[h] for h in range(24)])
-    base_chiller_tr = max(peak_load * 0.3, max_residual_load) if is_greenfield else active_working_tr
     des_chw_p_kw, des_chw_s_kw, des_cw_kw, des_ct_kw = determine_design_kws(base_chiller_tr, scope, audit_cfg, is_ac)
 
-    # 4. Chronological Simulation (Accounting Step)
+    # Cyclical Start State Fix
+    storage = tes_trh 
+
     for h, tr in enumerate(load_24):
         c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
         
         if h in charge_hrs:
             c_tr = charge_schedule[h]
             c_k += c_tr * get_plv_kw_tr(1.0, 0.85, False, True, wbt_24[h])
+            storage = min(tes_trh, storage + c_tr)
             
             op_tr_curr = tr
             lf = tr / max(1.0, base_chiller_tr)
@@ -185,7 +200,9 @@ def simulate_pcm(load_24, tar_24, wbt_24, active_working_tr, tes_trh, fleet_df, 
             
         else:
             d_tr = discharge_schedule[h]
-            op_tr_curr = max(0.0, tr - d_tr)
+            actual_discharge = min(d_tr, storage)
+            storage -= actual_discharge
+            op_tr_curr = max(0.0, tr - actual_discharge)
             
             if op_tr_curr > 0:
                 lf = op_tr_curr / max(1.0, base_chiller_tr)
@@ -224,74 +241,64 @@ def simulate_stratified(load_24, tar_24, wbt_24, active_working_tr, tes_trh, fle
     is_ac = check_fleet_air_cooled(fleet_df)
     peak_load = max(load_24)
     
-    # 1. Predictive BMS: Identify Charging Window
     low_tar = np.percentile(tar_24, 35) 
     charge_hrs = [h for h in range(24) if tar_24[h] <= low_tar]
     non_charge_hrs = [h for h in range(24) if h not in charge_hrs]
     
-    # 2. Iterative Proportional Sizing (To balance Base TR and Charging Capability)
+    # 1. Stratified Specific Sizing & Charge Capacity
+    base_chiller_tr = active_working_tr
     if is_greenfield:
-        discharge_schedule = [0.0] * 24
-        storage_avail = tes_trh
-        unique_tariffs = sorted(list(set([tar_24[h] for h in non_charge_hrs])), reverse=True)
-        for tar in unique_tariffs:
-            if storage_avail <= 0.01: break
-            tier_hrs = [h for h in non_charge_hrs if tar_24[h] == tar]
-            total_tier_load = sum(load_24[h] for h in tier_hrs)
-            if total_tier_load > 0:
-                tier_storage = storage_avail
-                for h in tier_hrs:
-                    alloc = min(load_24[h], tier_storage * (load_24[h] / total_tier_load))
-                    discharge_schedule[h] = alloc
-                    storage_avail -= alloc
-
-        max_residual = max([load_24[h] - discharge_schedule[h] for h in range(24)])
-        total_discharge = sum(discharge_schedule)
-        base_chiller_tr = max(peak_load * 0.3, max_residual)
-
-        # Base chiller must be large enough to charge the tank at night
-        while True:
-            total_charge_potential = sum(max(0.0, base_chiller_tr - load_24[h]) for h in charge_hrs)
-            if total_charge_potential >= total_discharge or base_chiller_tr >= peak_load:
+        target_base = peak_load
+        while target_base > peak_load * 0.30:
+            shave_needed = sum(max(0.0, load_24[h] - target_base) for h in non_charge_hrs)
+            charge_avail = sum(max(0.0, target_base - load_24[h]) for h in charge_hrs)
+            if shave_needed > tes_trh or shave_needed > charge_avail:
+                target_base += 10.0
                 break
-            base_chiller_tr += 50.0 
-    else:
-        base_chiller_tr = active_working_tr
-        total_charge_potential = sum(max(0.0, base_chiller_tr - load_24[h]) for h in charge_hrs)
-        actual_max_storage = min(tes_trh, total_charge_potential)
+            target_base -= 10.0
+        base_chiller_tr = target_base
+        
+    charge_avail = sum(max(0.0, base_chiller_tr - load_24[h]) for h in charge_hrs)
+    actual_max_storage = min(tes_trh, charge_avail)
 
-        discharge_schedule = [0.0] * 24
-        storage_avail = actual_max_storage
-        unique_tariffs = sorted(list(set([tar_24[h] for h in non_charge_hrs])), reverse=True)
-        for tar in unique_tariffs:
-            if storage_avail <= 0.01: break
-            tier_hrs = [h for h in non_charge_hrs if tar_24[h] == tar]
-            total_tier_load = sum(load_24[h] for h in tier_hrs)
-            if total_tier_load > 0:
-                tier_storage = storage_avail
-                for h in tier_hrs:
-                    alloc = min(load_24[h], tier_storage * (load_24[h] / total_tier_load))
-                    discharge_schedule[h] = alloc
-                    storage_avail -= alloc
-        total_discharge = sum(discharge_schedule)
+    discharge_schedule = [0.0] * 24
+    storage_avail = actual_max_storage
 
-    # 3. Exact Balanced Charging Schedule (Evenly distributed over spare capacity)
-    charge_schedule = [0.0] * 24
-    if total_discharge > 0:
-        charge_potential = [max(0.0, base_chiller_tr - load_24[h]) if h in charge_hrs else 0.0 for h in range(24)]
-        total_pot = sum(charge_potential)
-        for h in charge_hrs:
-            if total_pot > 0:
-                charge_schedule[h] = total_discharge * (charge_potential[h] / total_pot)
+    # 2. Peak Shaving
+    for h in non_charge_hrs:
+        if load_24[h] > base_chiller_tr:
+            shave = min(storage_avail, load_24[h] - base_chiller_tr)
+            discharge_schedule[h] = shave
+            storage_avail -= shave
+            
+    # 3. OPEX Arbitrage
+    unique_tariffs = sorted(list(set([tar_24[h] for h in non_charge_hrs])), reverse=True)
+    for tar in unique_tariffs:
+        if storage_avail <= 0.01: break
+        tier_hrs = [h for h in non_charge_hrs if tar_24[h] == tar]
+        rem_loads = {h: max(0.0, load_24[h] - discharge_schedule[h]) for h in tier_hrs}
+        tot_tier_load = sum(rem_loads.values())
+        
+        if tot_tier_load > 0:
+            tier_storage = min(storage_avail, tot_tier_load)
+            for h in tier_hrs:
+                alloc = tier_storage * (rem_loads[h] / tot_tier_load)
+                discharge_schedule[h] += alloc
+                storage_avail -= alloc
 
     des_chw_p_kw, des_chw_s_kw, des_cw_kw, des_ct_kw = determine_design_kws(base_chiller_tr, scope, audit_cfg, is_ac)
 
-    # 4. Simulation Loop (Accounting)
+    # Cyclical Start State Fix
+    storage = actual_max_storage
+
     for h, tr in enumerate(load_24):
         c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
         
         if h in charge_hrs:
-            c_tr = charge_schedule[h]
+            spare = max(0.0, base_chiller_tr - tr)
+            c_tr = min(spare, (tes_trh - storage))
+            storage = min(tes_trh, storage + c_tr)
+            
             op_tr_curr = tr + c_tr
             lf = op_tr_curr / max(1.0, base_chiller_tr)
             pump_lf = max(0.30, lf)
@@ -303,7 +310,9 @@ def simulate_stratified(load_24, tar_24, wbt_24, active_working_tr, tes_trh, fle
             
         else:
             d_tr = discharge_schedule[h]
-            op_tr_curr = max(0.0, tr - d_tr)
+            actual_discharge = min(d_tr, storage)
+            storage -= actual_discharge
+            op_tr_curr = max(0.0, tr - actual_discharge)
             
             if op_tr_curr > 0:
                 lf = op_tr_curr / max(1.0, base_chiller_tr)
