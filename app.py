@@ -175,7 +175,7 @@ with t1:
     tot_active_tr = sum(active_fleet["Capacity (TR)"] * active_fleet["Quantity"])
 
     a1, a2, a3 = st.columns(3)
-    a1.metric("Total Installed Chiller Sizing (N+1)", f"{tot_chiller_tr:.0f} TR")
+    a1.metric("Total Installed Chiller Sizing", f"{tot_chiller_tr:.0f} TR")
     a2.metric("Active Working Capacity", f"{tot_active_tr:.0f} TR")
 
     st.session_state.chiller_fleet = st.data_editor(
@@ -341,7 +341,6 @@ with t6:
         st.markdown("---")
         st.subheader("🏗️ CAPEX Breakup")
         
-        # EXACT 8-KEY CAPEX ALIGNMENT
         keys = ["Chiller Equip.", "TES System", "Pumps & PHE", "Electrical", "Water Infra", "Transformer", "DG Set", "Indirects / AMC"]
         
         b_c = [format_currency(res['c']['bk'].get(k, 0.0), curr) for k in keys]

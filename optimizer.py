@@ -69,7 +69,6 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     is_greenfield = proj_scope != "Brownfield (Retrofit)"
     peak_load = max(load_arr)
     
-    # Conventional Baseline uses pure user-input array
     total_installed_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else peak_load * 1.2
     active_df = df_comp[df_comp["Standby"] == False] if "Standby" in df_comp.columns else df_comp
     active_working_tr = max(1.0, sum(active_df["Capacity (TR)"] * active_df["Quantity"]) if not active_df.empty else total_installed_tr)
@@ -92,7 +91,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
 
     if is_greenfield:
         pcm_search_space = np.linspace(peak_load * 1.0, peak_load * 8, 25)
-        strat_search_space = np.linspace(peak_load * 1.0, peak_load * 4, 15)
+        strat_search_space = np.linspace(peak_load * 1.0, peak_load * 4, 15) # Hard cap Stratified to max 4 hours to prevent physical impossibilities
     else:
         max_retrofit_trh = max(500.0, avg_spare_capacity * 8.0) 
         pcm_search_space = np.linspace(500, max_retrofit_trh, 20)
@@ -101,15 +100,12 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     # 3. PCM Optimization
     best_pcm = {"opex_savings": -1, "payback": 99, "score": -9999}
     for trh in pcm_search_space:
-        c_tr = trh / 8.0  
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        base_chiller_tr = sim["base_chiller_tr"]
+        c_tr = sim["charge_chiller_tr"]
         new_c_tr = max(0.0, c_tr - existing_brine_tr) if not is_greenfield else c_tr
         
-        # Absolute safeguard against Base TR = 0
-        base_chiller_tr = max(peak_load * 0.3, peak_load - c_tr) if is_greenfield else active_working_tr
-        
-        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, base_chiller_tr, trh, c_tr, df_comp, audit_cfg, running_days, proj_scope)
         cap = build_capex_breakdown("PCM", proj_scope, base_chiller_tr, trh, new_c_tr, rates, is_ac, tank_shape)
-        
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
         
@@ -124,10 +120,10 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
             
     if best_pcm["opex_savings"] == -1: 
         trh = pcm_search_space[len(pcm_search_space)//2]
-        c_tr = trh / 8.0
+        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        base_chiller_tr = sim["base_chiller_tr"]
+        c_tr = sim["charge_chiller_tr"]
         new_c_tr = max(0.0, c_tr - existing_brine_tr) if not is_greenfield else c_tr
-        base_chiller_tr = max(peak_load * 0.3, peak_load - c_tr) if is_greenfield else active_working_tr
-        sim = simulate_pcm(load_arr, tar_arr, wbt_arr, base_chiller_tr, trh, c_tr, df_comp, audit_cfg, running_days, proj_scope)
         cap = build_capex_breakdown("PCM", proj_scope, base_chiller_tr, trh, new_c_tr, rates, is_ac, tank_shape)
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
@@ -138,11 +134,10 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     # 4. Stratified Optimization
     best_strat = {"opex_savings": -1, "payback": 99, "score": -9999}
     for trh in strat_search_space:
-        base_chiller_tr = max(peak_load * 0.3, peak_load - (trh / 8.0)) if is_greenfield else active_working_tr
+        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        base_chiller_tr = sim["base_chiller_tr"]
         
-        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, base_chiller_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
         cap = build_capex_breakdown("Stratified", proj_scope, base_chiller_tr, trh, 0, rates, is_ac, tank_shape)
-        
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
         
@@ -157,8 +152,8 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
             
     if best_strat["opex_savings"] == -1: 
         trh = strat_search_space[len(strat_search_space)//2]
-        base_chiller_tr = max(peak_load * 0.3, peak_load - (trh / 8.0)) if is_greenfield else active_working_tr
-        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, base_chiller_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        sim = simulate_stratified(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
+        base_chiller_tr = sim["base_chiller_tr"]
         cap = build_capex_breakdown("Stratified", proj_scope, base_chiller_tr, trh, 0, rates, is_ac, tank_shape)
         w_cost = sim["water_m3"] * audit_cfg.get("water_cost_per_m3", 65.0)
         sim["annual_opex"] += w_cost
@@ -189,7 +184,7 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     co2_saved_s = ((sim_conv["annual_opex"] - best_strat["sim"]["annual_opex"]) / max(1.0, avg_tariff)) * 0.82 / 1000.0
 
     return {
-        "c": {"base_chiller_tr": total_installed_tr, "capex": cap_conv["Total CAPEX"], "opex": sim_conv["annual_opex"], "bk": cap_conv["Breakdown"], "sim": sim_conv, "dg_cost": dg_cost_baseline, "water_cost": water_cost_conv, "co2": 0.0},
+        "c": {"base_chiller_tr": total_installed_tr if is_greenfield else active_working_tr, "capex": cap_conv["Total CAPEX"], "opex": sim_conv["annual_opex"], "bk": cap_conv["Breakdown"], "sim": sim_conv, "dg_cost": dg_cost_baseline, "water_cost": water_cost_conv, "co2": 0.0},
         "p": {"tes_trh": best_pcm["tes_trh"], "chiller_tr": best_pcm["chiller_tr"], "new_chiller_tr": best_pcm["new_chiller_tr"], "base_chiller_tr": best_pcm["base_chiller_tr"], "num_tanks": best_pcm["num_tanks"], "capex": best_pcm["cap"]["Total CAPEX"], "opex": best_pcm["sim"]["annual_opex"], "bk": best_pcm["cap"]["Breakdown"], "sim": best_pcm["sim"], "pb": best_pcm["payback"], "sav": best_pcm["opex_savings"], "dg_cost": dg_cost_tes_p, "water_cost": best_pcm["water_cost"], "grid_offset": grid_offset_p, "co2": co2_saved_p},
         "s": {"tes_trh": best_strat["tes_trh"], "base_chiller_tr": best_strat["base_chiller_tr"], "num_tanks": best_strat["num_tanks"], "capex": best_strat["cap"]["Total CAPEX"], "opex": best_strat["sim"]["annual_opex"], "bk": best_strat["cap"]["Breakdown"], "sim": best_strat["sim"], "pb": best_strat["payback"], "sav": best_strat["opex_savings"], "dg_cost": dg_cost_tes_s, "water_cost": best_strat["water_cost"], "grid_offset": grid_offset_s, "co2": co2_saved_s}
     }
