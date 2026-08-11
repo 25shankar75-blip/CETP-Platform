@@ -258,6 +258,12 @@ with t6:
                 "Stratified TES Option": f"{st.session_state.proj_cfg.peak_tr:.1f} TR"
             },
             {
+                "Parameter": "Base Chiller Sizing",
+                "Conventional / Existing": f"{res['c'].get('base_chiller_tr', 0):.0f} TR",
+                "PCM TES Option": f"{res['p'].get('base_chiller_tr', 0):.0f} TR",
+                "Stratified TES Option": f"{res['s'].get('base_chiller_tr', 0):.0f} TR"
+            },
+            {
                 "Parameter": "TES Capacity (TRh)",
                 "Conventional / Existing": "0 TRh",
                 "PCM TES Option": f"{res['p']['tes_trh']:.0f} TRh ({res['p']['num_tanks']} Tank)",
@@ -266,7 +272,7 @@ with t6:
             {
                 "Parameter": "Brine Chiller Sourcing",
                 "Conventional / Existing": "N/A",
-                "PCM TES Option": f"{res['p']['new_chiller_tr']:.0f} TR New ({res['p']['chiller_tr']:.0f} TR Total)",
+                "PCM TES Option": f"{res['p'].get('new_chiller_tr',0):.0f} TR New ({res['p'].get('chiller_tr',0):.0f} TR Total)",
                 "Stratified TES Option": "N/A (Spare Fleet Charging)"
             },
             {
