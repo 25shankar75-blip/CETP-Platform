@@ -62,8 +62,6 @@ class AuditConfig(BaseModel):
     run_cw_flow_m3h: Optional[float] = None
     run_ct_fan_kw: Optional[float] = None
     water_cost_per_m3: Optional[float] = None
-    
-    # Rev 19 Chiller Performance Baselines
     kw_tr_base: Optional[float] = None
     kw_tr_brine: Optional[float] = None
     kw_tr_ac: Optional[float] = None
@@ -81,8 +79,6 @@ class FinancialConfig(BaseModel):
     indirects_pct: Optional[float] = None
     dg_diesel_cost_kwh: Optional[float] = None
     daily_outage_hrs: Optional[float] = None
-    
-    # Rev 19 Economic Escalators
     discount_rate_pct: Optional[float] = None
     elec_escalation_pct: Optional[float] = None
     water_escalation_pct: Optional[float] = None

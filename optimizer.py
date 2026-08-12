@@ -6,21 +6,12 @@ import numpy as np
 from physics_engine import simulate_conventional, simulate_pcm, simulate_stratified, check_fleet_air_cooled
 
 def build_capex_breakdown(sys_type, scope, base_tr, tes_trh, brine_tr, rates, is_air_cooled=False, tank_shape="Cylindrical Tank"):
-    """Strict 8-Key CAPEX Array"""
     b = {
-        "Chiller Equip.": 0.0, 
-        "TES System": 0.0, 
-        "Pumps & PHE": 0.0, 
-        "Electrical": 0.0, 
-        "Water Infra": 0.0, 
-        "Transformer": 0.0, 
-        "DG Set": 0.0,
-        "Indirects / AMC": 0.0  
+        "Chiller Equip.": 0.0, "TES System": 0.0, "Pumps & PHE": 0.0, "Electrical": 0.0, 
+        "Water Infra": 0.0, "Transformer": 0.0, "DG Set": 0.0, "Indirects / AMC": 0.0  
     }
-    
     is_greenfield = scope != "Brownfield (Retrofit)"
     
-    # Fallbacks for empty rates
     base_rate = rates.get("base_chiller_rate") or 22000.0
     ac_rate = rates.get("ac_chiller_rate") or 24000.0
     brine_rate = rates.get("brine_chiller_rate") or 25000.0
@@ -45,10 +36,8 @@ def build_capex_breakdown(sys_type, scope, base_tr, tes_trh, brine_tr, rates, is
     elif sys_type == "PCM":
         b["Chiller Equip."] = brine_tr * brine_rate
         if is_greenfield: b["Chiller Equip."] += base_tr * (ac_rate if is_air_cooled else base_rate)
-        
         pcm_rate = pcm_cyl if tank_shape == "Cylindrical Tank" else pcm_rect
         b["TES System"] = tes_trh * pcm_rate 
-        
         cap_tr = (base_tr + brine_tr) if is_greenfield else brine_tr
         b["Pumps & PHE"] = cap_tr * 3000.0
         b["Electrical"] = cap_tr * 1500.0
@@ -59,7 +48,6 @@ def build_capex_breakdown(sys_type, scope, base_tr, tes_trh, brine_tr, rates, is
     elif sys_type == "Stratified":
         if is_greenfield: b["Chiller Equip."] = base_tr * (ac_rate if is_air_cooled else base_rate)
         b["TES System"] = tes_trh * strat_rate
-        
         cap_tr = (base_tr + (tes_trh / 8.0)) if is_greenfield else (tes_trh / 8.0)
         b["Pumps & PHE"] = cap_tr * 1500.0
         b["Electrical"] = cap_tr * 1000.0
@@ -69,7 +57,6 @@ def build_capex_breakdown(sys_type, scope, base_tr, tes_trh, brine_tr, rates, is
 
     subtotal = sum(v for k, v in b.items() if k != "Indirects / AMC")
     b["Indirects / AMC"] = subtotal * indirect_pct
-    
     return {"Total CAPEX": subtotal + b["Indirects / AMC"], "Breakdown": b}
 
 def eval_payback(capex_delta, opex_savings):
@@ -81,9 +68,17 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
     is_greenfield = proj_scope != "Brownfield (Retrofit)"
     peak_load = max(load_arr)
     
-    total_installed_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else peak_load * 1.2
-    active_df = df_comp[df_comp["Standby"] == False] if "Standby" in df_comp.columns else df_comp
-    active_working_tr = max(1.0, sum(active_df["Capacity (TR)"] * active_df["Quantity"]) if not active_df.empty else total_installed_tr)
+    total_installed_tr = sum(df_comp["Capacity (TR)"] * df_comp["Quantity"]) if not df_comp.empty else 0.0
+    
+    # Auto-size if UI input is completely blank
+    if total_installed_tr == 0:
+        chiller_module = audit_cfg.get("chiller_module_tr") or 700.0
+        num_chillers = int(np.ceil(peak_load / chiller_module))
+        active_working_tr = num_chillers * chiller_module
+        total_installed_tr = active_working_tr + chiller_module
+    else:
+        active_df = df_comp[df_comp["Standby"] == False] if "Standby" in df_comp.columns else df_comp
+        active_working_tr = max(1.0, sum(active_df["Capacity (TR)"] * active_df["Quantity"]) if not active_df.empty else total_installed_tr)
 
     existing_brine_tr = 0.0
     if not is_greenfield and not df_comp.empty:
@@ -108,7 +103,6 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
         pcm_search_space = np.linspace(500, max_retrofit_trh, 20)
         strat_search_space = np.linspace(500, min(max_retrofit_trh, peak_load * 4), 15)
     
-    # Helper to evaluate config
     def evaluate_tes(trh, is_pcm):
         sim = simulate_pcm(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope) if is_pcm else simulate_stratified(load_arr, tar_arr, wbt_arr, active_working_tr, trh, df_comp, audit_cfg, running_days, proj_scope)
         base_chiller_tr = sim["base_chiller_tr"]
@@ -121,15 +115,13 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
         delta_c = cap["Total CAPEX"] if not is_greenfield else (cap["Total CAPEX"] - cap_conv["Total CAPEX"])
         pb = eval_payback(delta_c, sav)
         
-        # Strict Rejection Criteria (< 4.0 ROI and CAPEX validation)
         status = "NOT RECOMMENDED"
         if pb <= 4.0 and sav > 0:
             if not is_greenfield or (is_greenfield and cap["Total CAPEX"] <= cap_conv["Total CAPEX"]):
                 status = "RECOMMENDED"
 
-        return {"tes_trh": trh, "chiller_tr": c_tr, "new_chiller_tr": new_c_tr, "base_chiller_tr": base_chiller_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb, "score": sav / max(0.1, pb) if is_greenfield else sav, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost, "status": status}
+        return {"tes_trh": trh, "chiller_tr": c_tr, "new_chiller_tr": new_c_tr, "base_chiller_tr": base_chiller_tr, "sim": sim, "cap": cap, "opex_savings": sav, "payback": pb, "score": sav, "num_tanks": int(np.ceil(trh / 25000.0)), "water_cost": w_cost, "status": status}
 
-    # Optimization Loops
     best_pcm = {"status": "NOT RECOMMENDED", "score": -9999}
     for trh in pcm_search_space:
         res = evaluate_tes(trh, is_pcm=True)
@@ -142,10 +134,8 @@ def optimize_plant(df_comp, load_arr, tar_arr, wbt_arr, proj_scope, audit_cfg, r
         if res["status"] == "RECOMMENDED" and res["score"] > best_strat.get("score", -9999): best_strat = res
     if best_strat["status"] == "NOT RECOMMENDED": best_strat = evaluate_tes(strat_search_space[len(strat_search_space)//2], False)
 
-    # Outages & DG Offsets
     dg_kwh_cost = rates.get("dg_diesel_cost_kwh") or 24.50
     outage_hrs = rates.get("daily_outage_hrs") or 1.5
-    
     dg_cost_baseline = dg_kwh_cost * (np.mean(sim_conv["comp_kw"]) + np.mean(sim_conv["chw_pri_kw"]) + np.mean(sim_conv["chw_sec_kw"])) * outage_hrs * running_days
     avg_tariff = np.mean(tar_arr)
 
