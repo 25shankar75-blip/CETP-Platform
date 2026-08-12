@@ -3,6 +3,7 @@ Cooling Energy Transition Platform (CETP) - Data Contracts & Schemas
 File: schemas.py
 """
 from pydantic import BaseModel
+from typing import Optional
 from enum import Enum
 
 CURRENCY_MULTIPLIERS = {
@@ -37,39 +38,51 @@ class ChillerTypeEnum(str, Enum):
     DUAL_MODE = "Dual-Mode Chiller"
 
 class ProjectConfig(BaseModel):
-    project_name: str = "Mondelez 3017 TRh Plant"
-    location: str = "Gurugram, HR"
+    project_name: Optional[str] = None
+    location: Optional[str] = None
     sector: str = SectorEnum.FMCG.value
     scope: str = ScopeEnum.GREENFIELD.value
     currency: str = "INR (₹)"
     tank_shape: str = TankShapeEnum.CYLINDRICAL.value
-    peak_tr: float = 2794.18
-    running_days: int = 365
+    peak_tr: Optional[float] = None
+    running_days: Optional[int] = None
+    chiller_module_tr: Optional[float] = None
+    project_life_years: Optional[int] = None
 
 class AuditConfig(BaseModel):
-    run_chw_sup_c: float = 8.0
-    run_chw_ret_c: float = 12.0
-    run_chw_head_m: float = 30.0
-    run_sec_chw_head_m: float = 0.0
-    run_cw_sup_c: float = 32.0
-    run_cw_ret_c: float = 37.0
-    run_cw_head_m: float = 25.0
-    run_chw_flow_m3h: float = 500.0
-    run_sec_chw_flow_m3h: float = 0.0
-    run_cw_flow_m3h: float = 600.0
-    run_ct_fan_kw: float = 45.0
-    water_cost_per_m3: float = 65.0
+    run_chw_sup_c: Optional[float] = None
+    run_chw_ret_c: Optional[float] = None
+    run_chw_head_m: Optional[float] = None
+    run_sec_chw_head_m: Optional[float] = None
+    run_cw_sup_c: Optional[float] = None
+    run_cw_ret_c: Optional[float] = None
+    run_cw_head_m: Optional[float] = None
+    run_chw_flow_m3h: Optional[float] = None
+    run_sec_chw_flow_m3h: Optional[float] = None
+    run_cw_flow_m3h: Optional[float] = None
+    run_ct_fan_kw: Optional[float] = None
+    water_cost_per_m3: Optional[float] = None
+    
+    # Rev 19 Chiller Performance Baselines
+    kw_tr_base: Optional[float] = None
+    kw_tr_brine: Optional[float] = None
+    kw_tr_ac: Optional[float] = None
 
 class FinancialConfig(BaseModel):
-    base_chiller_rate: float = 22000.0
-    ac_chiller_rate: float = 24000.0
-    brine_chiller_rate: float = 25000.0
-    pcm_cyl_rate: float = 7800.0
-    pcm_rect_rate: float = 8300.0
-    stratified_tes_rate: float = 18000.0
-    dg_set_rate: float = 12500.0
-    transformer_rate: float = 3500.0
-    water_infra_rate: float = 1200.0
-    indirects_pct: float = 0.30
-    dg_diesel_cost_kwh: float = 24.50
-    daily_outage_hrs: float = 1.5
+    base_chiller_rate: Optional[float] = None
+    ac_chiller_rate: Optional[float] = None
+    brine_chiller_rate: Optional[float] = None
+    pcm_cyl_rate: Optional[float] = None
+    pcm_rect_rate: Optional[float] = None
+    stratified_tes_rate: Optional[float] = None
+    dg_set_rate: Optional[float] = None
+    transformer_rate: Optional[float] = None
+    water_infra_rate: Optional[float] = None
+    indirects_pct: Optional[float] = None
+    dg_diesel_cost_kwh: Optional[float] = None
+    daily_outage_hrs: Optional[float] = None
+    
+    # Rev 19 Economic Escalators
+    discount_rate_pct: Optional[float] = None
+    elec_escalation_pct: Optional[float] = None
+    water_escalation_pct: Optional[float] = None

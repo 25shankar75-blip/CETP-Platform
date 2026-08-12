@@ -22,6 +22,7 @@ def fetch_live_currency_rates() -> dict:
     return CURRENCY_MULTIPLIERS
 
 def format_currency(value_inr: float, currency_str: str, live_rates=None) -> str:
+    if value_inr is None: return "-"
     rates = live_rates if live_rates else CURRENCY_MULTIPLIERS
     cfg = rates.get(currency_str, rates["INR (₹)"])
     return f"{cfg['symbol']} {(value_inr * cfg['rate']) / cfg['div']:.2f} {cfg['unit']}"
