@@ -1,283 +1,289 @@
 """
-Cooling Energy Transition Platform (CETP) - Physics & Live Weather Engine
+Cooling Energy Transition Platform (CETP) - ASHRAE Thermodynamics, API Weather & Dispatch Engine
 File: physics_engine.py
 """
 import numpy as np
+import pandas as pd
 import urllib.request
-import urllib.parse
 import json
 
-def fetch_live_weather_wbt(location_str: str) -> dict:
+def fetch_live_weather_wbt(location_str: str, lat: float = 23.1765, lon: float = 75.7885) -> dict:
+    """Fetch location WBT / DBT or fallback to robust synthetic diurnal curve."""
     try:
-        safe_loc = urllib.parse.quote(location_str)
-        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={safe_loc}&count=1"
-        geo_req = urllib.request.Request(geo_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(geo_req, timeout=3) as geo_resp:
-            geo_data = json.loads(geo_resp.read().decode())
-            if "results" in geo_data and len(geo_data["results"]) > 0:
-                lat, lon = geo_data["results"][0]["latitude"], geo_data["results"][0]["longitude"]
-            else:
-                lat, lon = 28.4595, 77.0266  
-
-        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m&forecast_days=1"
-        w_req = urllib.request.Request(weather_url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(w_req, timeout=3) as w_resp:
-            w_data = json.loads(w_resp.read().decode())
-            dbt = w_data["hourly"]["temperature_2m"][:24]
-            rh = w_data["hourly"]["relative_humidity_2m"][:24]
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&hourly=temperature_2m,relative_humidity_2m&forecast_days=1"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode())
+            dbt = data["hourly"]["temperature_2m"][:24]
+            rh = data["hourly"]["relative_humidity_2m"][:24]
+            # Stull equation approximation for Wet Bulb Temp (WBT)
             wbt = [
-                d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035 
+                d * np.arctan(0.151977 * (r + 8.313659)**0.5) + np.arctan(d + r) - np.arctan(r - 1.676331) + 0.00391838 * (r**1.5) * np.arctan(0.023101 * r) - 4.686035
                 for d, r in zip(dbt, rh)
             ]
-            return {"wbt": wbt, "dbt": dbt, "status": "LIVE"}
+            return {"dbt": dbt, "wbt": wbt, "status": "LIVE_API"}
     except Exception:
-        dbt_syn = [28.0 + 8.0 * np.sin((h - 8) * np.pi / 12) for h in range(24)]
-        wbt_syn = [22.0 + 5.0 * np.sin((h - 8) * np.pi / 12) for h in range(24)]
-        return {"wbt": wbt_syn, "dbt": dbt_syn, "status": "FALLBACK"}
+        # Fallback synthetic 24-hr profile
+        hours = np.arange(24)
+        dbt_synthetic = [28.0 + 8.0 * np.sin((h - 8) * np.pi / 12) for h in hours]
+        wbt_synthetic = [22.0 + 5.0 * np.sin((h - 8) * np.pi / 12) for h in hours]
+        return {"dbt": dbt_synthetic, "wbt": wbt_synthetic, "status": "SYNTHETIC_FALLBACK"}
 
-def calc_tr(flow_m3h, dt_c, fluid="water"):
-    cp = 4.186 if fluid == "water" else 3.65
-    rho = 1000.0 if fluid == "water" else 1035.0
-    return max(0.0, ((flow_m3h * rho / 3600.0) * cp * dt_c) / 3.51685)
+def calc_operating_tr(flow_m3h: float, dt_c: float, fluid_type: str = "water") -> float:
+    rho = 1000.0 if fluid_type == "water" else 1035.0
+    cp = 4.186 if fluid_type == "water" else 3.65
+    m_dot_kgs = (flow_m3h * rho) / 3600.0
+    kw_thermal = m_dot_kgs * cp * dt_c
+    return max(0.0, kw_thermal / 3.51685)
 
-def calc_design_flow(tr, dt_c, fluid="water"):
-    if dt_c <= 0: return 0.0
-    cp = 4.186 if fluid == "water" else 3.65
-    rho = 1000.0 if fluid == "water" else 1035.0
-    return (tr * 3.51685 * 3600.0) / (cp * dt_c * rho)
+def calc_hydraulic_pump_kw(flow_m3h: float, head_m: float, pump_eff: float = 0.75) -> float:
+    if flow_m3h <= 0 or head_m <= 0:
+        return 0.0
+    m_dot_kgs = (flow_m3h * 1000.0) / 3600.0
+    return (9.81 * m_dot_kgs * head_m) / (pump_eff * 1000.0)
 
-def calc_pump_kw(flow_m3h, head_m, eff=0.75):
-    if flow_m3h <= 0 or head_m <= 0: return 0.0
-    return max(0.0, (9.81 * (flow_m3h * 1000.0 / 3600.0) * head_m) / (eff * 1000.0))
-
-def get_fleet_ikw(fleet_df):
-    if fleet_df.empty or "ikW/TR" not in fleet_df.columns: return 0.62
-    active_df = fleet_df[fleet_df["Standby"] == False] if "Standby" in fleet_df.columns else fleet_df
-    if active_df.empty: active_df = fleet_df
-    weights = active_df["Capacity (TR)"] * active_df["Quantity"]
-    if sum(weights) == 0: return 0.62
-    return np.average(active_df["ikW/TR"], weights=weights)
-
-def check_fleet_air_cooled(fleet_df):
-    if fleet_df.empty or "Chiller Type" not in fleet_df.columns: return False
-    return any("Air-Cooled" in str(t) for t in fleet_df["Chiller Type"])
-
-def get_plv_kw_tr(load_factor, base_kw_tr=0.62, is_air_cooled=False, is_brine=False, wbt_val=24.0):
-    if load_factor <= 0: return 0.0
-    base = 0.85 if is_brine else base_kw_tr
-    if is_air_cooled and not is_brine: base *= 1.35 
-        
-    if load_factor < 0.3: plv = 1.25
-    elif load_factor < 0.5: plv = 1.10
-    elif load_factor < 0.85: plv = 0.95
-    else: plv = 1.00
-    
-    weather_relief = max(0.80, min(1.15, 1.0 - ((24.0 - wbt_val) * 0.015)))
-    return base * plv * weather_relief
-
-def calc_water_consumption_m3(cooling_tr_array, is_air_cooled=False, running_days=365):
-    if is_air_cooled: return 0.0
-    total_trh_day = np.sum(cooling_tr_array)
-    water_liters_day = total_trh_day * 16.0
-    return (water_liters_day / 1000.0) * running_days
-
-def determine_design_kws(fleet_tr, scope, audit_cfg, is_ac):
-    """Auto-calculates for Greenfield; Uses hard inputs for Retrofit."""
-    if scope == "Brownfield (Retrofit)":
-        p_kw = calc_pump_kw(audit_cfg.get("run_chw_flow_m3h", 0.0), audit_cfg.get("run_chw_head_m", 30.0))
-        s_kw = calc_pump_kw(audit_cfg.get("run_sec_chw_flow_m3h", 0.0), audit_cfg.get("run_sec_chw_head_m", 0.0))
-        cw_kw = 0.0 if is_ac else calc_pump_kw(audit_cfg.get("run_cw_flow_m3h", 0.0), audit_cfg.get("run_cw_head_m", 25.0))
-        ct_kw = 0.0 if is_ac else audit_cfg.get("run_ct_fan_kw", 0.0)
+def get_chiller_kw_per_tr(load_factor: float, base_kw_tr: float = 0.62, is_air_cooled: bool = False, is_night: bool = False, wbt_relief: float = 1.0) -> float:
+    if load_factor <= 0.0:
+        return 0.0
+    if load_factor < 0.3:
+        plv_mult = 1.25
+    elif load_factor < 0.5:
+        plv_mult = 1.10
+    elif load_factor < 0.85:
+        plv_mult = 0.95
     else:
-        dt_chw = max(1.0, audit_cfg.get("run_chw_ret_c", 12.0) - audit_cfg.get("run_chw_sup_c", 8.0))
-        flow_chw = calc_design_flow(fleet_tr, dt_chw)
-        p_kw = calc_pump_kw(flow_chw, audit_cfg.get("run_chw_head_m", 30.0))
-        s_kw = calc_pump_kw(flow_chw, audit_cfg.get("run_sec_chw_head_m", 0.0))
-        
-        dt_cw = max(1.0, audit_cfg.get("run_cw_ret_c", 37.0) - audit_cfg.get("run_cw_sup_c", 32.0))
-        flow_cw = calc_design_flow(fleet_tr * 1.25, dt_cw)
-        cw_kw = 0.0 if is_ac else calc_pump_kw(flow_cw, audit_cfg.get("run_cw_head_m", 25.0))
-        ct_kw = 0.0 if is_ac else (25.0 * (fleet_tr / 1000.0))
-        
-    return p_kw, s_kw, cw_kw, ct_kw
-
-def simulate_conventional(load_24, tar_24, wbt_24, fleet_tr, scope, audit_cfg: dict, fleet_df, running_days):
-    comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
-    fleet_ikw = get_fleet_ikw(fleet_df)
-    is_ac = check_fleet_air_cooled(fleet_df)
+        plv_mult = 1.00
     
-    des_chw_p_kw, des_chw_s_kw, des_cw_kw, des_ct_kw = determine_design_kws(fleet_tr, scope, audit_cfg, is_ac)
+    type_mult = 1.35 if is_air_cooled else 1.00
+    night_mult = 0.92 if is_night else 1.00
+    return base_kw_tr * plv_mult * type_mult * night_mult * wbt_relief
 
-    for h, tr in enumerate(load_24):
-        charge.append(0.0); discharge.append(0.0); op_chiller_tr.append(tr)
-        lf = min(1.0, tr / max(1.0, fleet_tr))
-        loading_factor.append(lf * 100.0)
+def simulate_24h_plant(df_24h: pd.DataFrame, scope: str, audit_config: dict, fleet_df: pd.DataFrame, weather_data: dict):
+    hours = df_24h["Hour"].values
+    loads = df_24h["Cooling Load (TR)"].values
+    tariffs = df_24h["Tariff (₹/kWh)"].values
+    
+    total_fleet_tr = sum(fleet_df["Capacity (TR)"] * fleet_df["Quantity"]) if not fleet_df.empty else 3000.0
+    is_any_ac = any("Air-Cooled" in str(t) for t in fleet_df["Chiller Type"]) if not fleet_df.empty else False
+
+    wbts = weather_data["wbt"]
+    op_tr, charge_tr, discharge_tr = [], [], []
+    comp_kw, chw_pri_kw, chw_sec_kw, cw_pump_kw, ct_fan_kw = [], [], [], [], []
+    lf_list = []
+
+    if scope == "Brownfield (Retrofit)":
+        dt_actual = audit_config.get("running_chw_return_c", 12.0) - audit_config.get("running_chw_supply_c", 8.0)
+        tr_measured = calc_operating_tr(audit_config.get("running_chw_flow_m3h", 500.0), dt_actual)
         
-        pump_lf = max(0.30, lf) # Absolute 30% / 15Hz VFD Limit
+        chw_pri = calc_hydraulic_pump_kw(audit_config.get("running_chw_flow_m3h", 500), audit_config.get("chw_pump_head_m", 30))
+        chw_sec = chw_pri * 0.4
+        cw_p = 0.0 if is_any_ac else calc_hydraulic_pump_kw(audit_config.get("running_cw_flow_m3h", 600), audit_config.get("cw_pump_head_m", 25))
+        ct_f = 0.0 if is_any_ac else audit_config.get("ct_fan_power_kw", 45.0)
         
-        if scope == "Brownfield (Retrofit)":
-            comp.append(tr * fleet_ikw) 
-            chw_pri.append(des_chw_p_kw); chw_sec.append(des_chw_s_kw); cw.append(des_cw_kw); ct.append(des_ct_kw)
-        else:
-            comp.append(tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h]))
-            chw_pri.append(des_chw_p_kw * (pump_lf**3))
-            chw_sec.append(des_chw_s_kw * (pump_lf**3)) 
-            cw.append(des_cw_kw * (pump_lf**3))
-            ct.append(des_ct_kw * pump_lf)
+        tot_aux_kw = chw_pri + chw_sec + cw_p + ct_f
+        actual_kw_tr = (tr_measured * 0.72 + tot_aux_kw) / max(1.0, tr_measured) if tr_measured > 0 else 0.91
+
+        for h, load, wbt in zip(hours, loads, wbts):
+            op_tr.append(load)
+            charge_tr.append(0.0)
+            discharge_tr.append(0.0)
+            lf = min(1.0, load / max(1.0, total_fleet_tr))
+            lf_list.append(lf * 100.0)
             
-    tot_kw = np.array(comp) + np.array(chw_pri) + np.array(chw_sec) + np.array(cw) + np.array(ct)
-    water_m3 = calc_water_consumption_m3(np.array(op_chiller_tr), is_air_cooled=is_ac, running_days=running_days)
-    
+            relief = max(0.85, 1.0 + 0.015 * (wbt - 24.0))
+
+            comp_kw.append(load * actual_kw_tr * relief)
+            chw_pri_kw.append(chw_pri)
+            chw_sec_kw.append(chw_sec)
+            cw_pump_kw.append(cw_p)
+            ct_fan_kw.append(ct_f)
+    else:
+        for h, load, wbt in zip(hours, loads, wbts):
+            is_night = (h >= 22 or h <= 6)
+            lf = min(1.0, load / max(1.0, total_fleet_tr))
+            lf_list.append(lf * 100.0)
+            op_tr.append(load)
+            charge_tr.append(0.0)
+            discharge_tr.append(0.0)
+            
+            relief = max(0.85, 1.0 + 0.015 * (wbt - 24.0))
+            kw_tr = get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_air_cooled=is_any_ac, is_night=is_night, wbt_relief=relief)
+            comp_kw.append(load * kw_tr)
+            
+            flow_r = max(0.4, load / max(1.0, total_fleet_tr))
+            chw_pri_kw.append(25.0 * flow_r)
+            chw_sec_kw.append(15.0 * (flow_r ** 3))
+            cw_pump_kw.append(0.0 if is_any_ac else 30.0 * (flow_r ** 3))
+            ct_fan_kw.append(0.0 if is_any_ac else 20.0 * flow_r)
+
+    total_kw = np.array(comp_kw) + np.array(chw_pri_kw) + np.array(chw_sec_kw) + np.array(cw_pump_kw) + np.array(ct_fan_kw)
+    hourly_cost = total_kw * tariffs
+
     return {
-        "cooling_tr": load_24, "charge_tr": charge, "discharge_tr": discharge, "op_chiller_tr": op_chiller_tr,
-        "loading_factor": loading_factor, "comp_kw": comp, "chw_pri_kw": chw_pri, "chw_sec_kw": chw_sec,
-        "cw_pump_kw": cw, "ct_fan_kw": ct, "total_kw": tot_kw, "tariff": tar_24, "hourly_cost": tot_kw * tar_24,
-        "annual_opex": np.sum(tot_kw * tar_24) * running_days, "water_m3": water_m3
+        "op_tr": np.array(op_tr),
+        "charge_tr": np.array(charge_tr),
+        "discharge_tr": np.array(discharge_tr),
+        "loading_pct": np.array(lf_list),
+        "comp_kw": np.array(comp_kw),
+        "chw_pri_kw": np.array(chw_pri_kw),
+        "chw_sec_kw": np.array(chw_sec_kw),
+        "cw_pump_kw": np.array(cw_pump_kw),
+        "ct_fan_kw": np.array(ct_fan_kw),
+        "total_kw": total_kw,
+        "hourly_cost": hourly_cost,
+        "daily_opex": np.sum(hourly_cost),
+        "annual_opex": np.sum(hourly_cost) * 365.0
     }
 
-def simulate_pcm(load_24, tar_24, wbt_24, active_fleet_tr, tes_trh, charge_chiller_tr, fleet_df, audit_cfg, running_days, scope):
-    comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
-    storage = 0.0
-    fleet_ikw = get_fleet_ikw(fleet_df)
-    is_ac = check_fleet_air_cooled(fleet_df)
+def simulate_pcm_tes_24h(df_24h: pd.DataFrame, tes_capacity_trh: float, charge_chiller_tr: float, fleet_installed_tr: float, weather_data: dict, is_any_ac: bool = False):
+    hours = df_24h["Hour"].values
+    loads = df_24h["Cooling Load (TR)"].values
+    tariffs = df_24h["Tariff (₹/kWh)"].values
+    wbts = weather_data["wbt"]
     
-    des_chw_p_kw, des_chw_s_kw, des_cw_kw, des_ct_kw = determine_design_kws(active_fleet_tr, scope, audit_cfg, is_ac)
+    # 1. Identify continuous 8-hour window with lowest sum of tariffs
+    rolling_8h = [np.sum([tariffs[(i+j)%24] for j in range(8)]) for i in range(24)]
+    best_start = np.argmin(rolling_8h)
+    charge_hours = [(best_start + j) % 24 for j in range(8)]
+    
+    peak_hours_idx = np.argsort(tariffs)[::-1][:6]
 
-    rolling_8 = [sum(tar_24[(i+j)%24] for j in range(8)) for i in range(24)]
-    charge_hrs = [(np.argmin(rolling_8) + j)%24 for j in range(8)]
-    
-    non_charge_hrs = [h for h in range(24) if h not in charge_hrs]
-    discharge_hrs = sorted(non_charge_hrs, key=lambda h: tar_24[h], reverse=True)
-    
-    for h, tr in enumerate(load_24):
-        c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
+    storage_state = 0.0
+    op_tr, c_tr, d_tr = [], [], []
+    c_kw, b_kw, pri_kw, sec_kw, cw_kw, ct_kw = [], [], [], [], [], []
+    lf_list, mode = [], []
+
+    for i in range(24):
+        h = hours[i]
+        load = loads[i]
+        t = tariffs[i]
+        wbt = wbts[i]
+        is_charge = (i in charge_hours)
+        is_peak = (i in peak_hours_idx)
         
-        if h in charge_hrs:
-            c_tr = charge_chiller_tr
-            c_k += charge_chiller_tr * get_plv_kw_tr(1.0, 0.85, False, True, wbt_24[h])
-            storage = min(tes_trh, storage + c_tr)
-            
-            lf = tr / max(1.0, active_fleet_tr)
-            pump_lf = max(0.30, lf)
-            c_k += tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            
-            chw_p_k = des_chw_p_kw * (pump_lf**3)
-            chw_s_k = (des_chw_s_kw * (pump_lf**3)) + calc_pump_kw(calc_design_flow(charge_chiller_tr, 5.0, "brine"), 30.0) 
-            cw_k = 0.0 if is_ac else (des_cw_kw * (pump_lf**3)) + calc_pump_kw(calc_design_flow(charge_chiller_tr*1.2, 5.0), 25.0)
-            ct_k = 0.0 if is_ac else (des_ct_kw * pump_lf) + 15.0
-            op_tr_curr = tr
-            
-        elif h in discharge_hrs and storage > 0: 
-            d_tr = min(tr, storage)
-            storage -= d_tr
-            rem = tr - d_tr
-            op_tr_curr = rem
-            if rem > 0:
-                lf = rem / max(1.0, active_fleet_tr)
-                pump_lf = max(0.30, lf)
-                c_k += rem * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-                chw_p_k = des_chw_p_kw * (pump_lf**3)
-                chw_s_k = des_chw_s_kw * (pump_lf**3)
-                cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
-                ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
-            else:
-                chw_p_k = 0.0
-                chw_s_k = des_chw_s_kw * (0.30**3)  
-                cw_k, ct_k = 0.0, 0.0
+        c_k, b_k = 0.0, 0.0
+        c_val, d_val = 0.0, 0.0
+        relief = max(0.85, 1.0 + 0.015 * (wbt - 24.0))
+        
+        if is_charge:
+            c_val = charge_chiller_tr
+            c_k = charge_chiller_tr * 0.82 * relief
+            storage_state = min(tes_capacity_trh, storage_state + c_val)
+            lf = load / max(1.0, fleet_installed_tr)
+            b_k = load * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_night=(h >= 22 or h <= 6), is_air_cooled=is_any_ac, wbt_relief=relief)
+            op_tr_curr = load
+            mode.append("CHARGING")
+        elif is_peak and storage_state > 0:
+            d_val = min(load, storage_state)
+            storage_state -= d_val
+            rem_load = load - d_val
+            op_tr_curr = rem_load
+            lf = rem_load / max(1.0, fleet_installed_tr)
+            b_k = rem_load * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_air_cooled=is_any_ac, wbt_relief=relief) if rem_load > 0 else 0.0
+            mode.append("FULL DISCHARGE" if rem_load == 0 else "PARTIAL DISCHARGE")
         else:
-            lf = tr / max(1.0, active_fleet_tr)
-            pump_lf = max(0.30, lf)
-            c_k += tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_p_kw * (pump_lf**3)
-            chw_s_k = des_chw_s_kw * (pump_lf**3)
-            cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
-            ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
-            op_tr_curr = tr
+            op_tr_curr = load
+            lf = load / max(1.0, fleet_installed_tr)
+            b_k = load * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_night=(h >= 22 or h <= 6), is_air_cooled=is_any_ac, wbt_relief=relief)
+            mode.append("NORMAL")
             
-        lf_curr = op_tr_curr / max(1.0, active_fleet_tr)
-        loading_factor.append(lf_curr * 100.0)
-        op_chiller_tr.append(op_tr_curr)
-        charge.append(c_tr); discharge.append(d_tr)
-        comp.append(c_k); chw_pri.append(chw_p_k); chw_sec.append(chw_s_k); cw.append(cw_k); ct.append(ct_k)
+        lf_list.append(lf * 100.0)
+        op_tr.append(op_tr_curr)
+        c_tr.append(c_val)
+        d_tr.append(d_val)
         
-    tot_kw = np.array(comp) + np.array(chw_pri) + np.array(chw_sec) + np.array(cw) + np.array(ct)
-    water_m3 = calc_water_consumption_m3(np.array(op_chiller_tr) + np.array(charge), is_air_cooled=is_ac, running_days=running_days)
-    
+        c_kw.append(c_k)
+        b_kw.append(b_k)
+        pri_kw.append(18.0)
+        sec_kw.append(22.0)
+        cw_kw.append(0.0 if is_any_ac else 25.0)
+        ct_kw.append(0.0 if is_any_ac else 15.0)
+
+    total_kw = np.array(c_kw) + np.array(b_kw) + np.array(pri_kw) + np.array(sec_kw) + np.array(cw_kw) + np.array(ct_kw)
+    hourly_cost = total_kw * tariffs
+
     return {
-        "cooling_tr": load_24, "charge_tr": charge, "discharge_tr": discharge, "op_chiller_tr": op_chiller_tr,
-        "loading_factor": loading_factor, "comp_kw": comp, "chw_pri_kw": chw_pri, "chw_sec_kw": chw_sec,
-        "cw_pump_kw": cw, "ct_fan_kw": ct, "total_kw": tot_kw, "tariff": tar_24, "hourly_cost": tot_kw * tar_24,
-        "annual_opex": np.sum(tot_kw * tar_24) * running_days, "water_m3": water_m3
+        "op_tr": np.array(op_tr),
+        "charge_tr": np.array(c_tr),
+        "discharge_tr": np.array(d_tr),
+        "loading_pct": np.array(lf_list),
+        "charge_kw": np.array(c_kw),
+        "base_chiller_kw": np.array(b_kw),
+        "pump_kw": np.array(pri_kw) + np.array(sec_kw) + np.array(cw_kw) + np.array(ct_kw),
+        "total_kw": total_kw,
+        "hourly_cost": hourly_cost,
+        "daily_opex": np.sum(hourly_cost),
+        "annual_opex": np.sum(hourly_cost) * 365.0,
+        "mode": mode,
+        "charge_start_hour": charge_hours[0] + 1
     }
 
-def simulate_stratified(load_24, tar_24, wbt_24, active_fleet_tr, tes_trh, fleet_df, audit_cfg, running_days, scope):
-    comp, chw_pri, chw_sec, cw, ct, charge, discharge, op_chiller_tr, loading_factor = [], [], [], [], [], [], [], [], []
-    storage = 0.0
-    fleet_ikw = get_fleet_ikw(fleet_df)
-    is_ac = check_fleet_air_cooled(fleet_df)
+def simulate_stratified_tes_24h(df_24h: pd.DataFrame, tes_capacity_trh: float, fleet_installed_tr: float, weather_data: dict, is_any_ac: bool = False):
+    hours = df_24h["Hour"].values
+    loads = df_24h["Cooling Load (TR)"].values
+    tariffs = df_24h["Tariff (₹/kWh)"].values
+    wbts = weather_data["wbt"]
     
-    des_chw_p_kw, des_chw_s_kw, des_cw_kw, des_ct_kw = determine_design_kws(active_fleet_tr, scope, audit_cfg, is_ac)
+    low_tariff_thresh = np.percentile(tariffs, 40)
+    peak_tariff_thresh = np.percentile(tariffs, 75)
     
-    low_tar = np.percentile(tar_24, 40)
-    discharge_hrs = sorted([h for h in range(24)], key=lambda h: tar_24[h], reverse=True)
+    storage_state = 0.0
+    comp_kw, pump_kw = [], []
+    mode = []
     
-    for h, tr in enumerate(load_24):
-        c_k, chw_p_k, chw_s_k, cw_k, ct_k, c_tr, d_tr, op_tr_curr = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, tr
-        spare = max(0.0, active_fleet_tr - tr)
+    op_tr, c_tr, d_tr = [], [], []
+
+    for i in range(24):
+        h = hours[i]
+        load = loads[i]
+        t = tariffs[i]
+        wbt = wbts[i]
         
-        if tar_24[h] <= low_tar and spare > 0:
-            c_tr = min(spare, (tes_trh - storage))
-            storage = min(tes_trh, storage + c_tr)
-            tot_load = tr + c_tr
-            op_tr_curr = tot_load
-            
-            lf = tot_load / max(1.0, active_fleet_tr)
-            pump_lf = max(0.30, lf)
-            c_k = tot_load * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_p_kw * (pump_lf**3)
-            chw_s_k = des_chw_s_kw * (pump_lf**3)
-            cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
-            ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
-            
-        elif h in discharge_hrs[:8] and storage > 0:
-            d_tr = min(tr, storage)
-            storage -= d_tr
-            rem = tr - d_tr
-            op_tr_curr = rem
-            if rem > 0:
-                lf = rem / max(1.0, active_fleet_tr)
-                pump_lf = max(0.30, lf)
-                c_k = rem * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-                chw_p_k = des_chw_p_kw * (pump_lf**3)
-                chw_s_k = des_chw_s_kw * (pump_lf**3)
-                cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
-                ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
-            else:
-                chw_p_k = 0.0
-                chw_s_k = des_chw_s_kw * (0.30**3)
-                cw_k, ct_k = 0.0, 0.0
+        avail_tr = max(0.0, fleet_installed_tr - load)
+        relief = max(0.85, 1.0 + 0.015 * (wbt - 24.0))
+
+        c_val, d_val = 0.0, 0.0
+        
+        if t <= low_tariff_thresh and avail_tr > 100:
+            c_val = min(avail_tr, (tes_capacity_trh - storage_state) / 2.0)
+            storage_state = min(tes_capacity_trh, storage_state + c_val)
+            total_chiller_tr = load + c_val
+            lf = total_chiller_tr / max(1.0, fleet_installed_tr)
+            c_k = total_chiller_tr * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_night=(h >= 22 or h <= 6), is_air_cooled=is_any_ac, wbt_relief=relief)
+            p_k = 42.0
+            mode.append("CHARGING")
+        elif t >= peak_tariff_thresh and storage_state > 0:
+            d_val = min(load, storage_state)
+            storage_state -= d_val
+            rem_load = load - d_val
+            lf = rem_load / max(1.0, fleet_installed_tr)
+            c_k = rem_load * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_air_cooled=is_any_ac, wbt_relief=relief)
+            p_k = 35.0
+            mode.append("FULL DISCHARGE" if rem_load == 0 else "PARTIAL DISCHARGE")
         else:
-            lf = tr / max(1.0, active_fleet_tr)
-            pump_lf = max(0.30, lf)
-            c_k = tr * get_plv_kw_tr(lf, fleet_ikw, is_ac, False, wbt_24[h])
-            chw_p_k = des_chw_p_kw * (pump_lf**3)
-            chw_s_k = des_chw_s_kw * (pump_lf**3)
-            cw_k = 0.0 if is_ac else des_cw_kw * (pump_lf**3)
-            ct_k = 0.0 if is_ac else des_ct_kw * pump_lf
-            op_tr_curr = tr
+            lf = load / max(1.0, fleet_installed_tr)
+            c_k = load * get_chiller_kw_per_tr(lf, base_kw_tr=0.62, is_night=(h >= 22 or h <= 6), is_air_cooled=is_any_ac, wbt_relief=relief)
+            p_k = 30.0
+            mode.append("NORMAL")
             
-        lf_curr = op_tr_curr / max(1.0, active_fleet_tr)
-        loading_factor.append(lf_curr * 100.0)
-        op_chiller_tr.append(op_tr_curr)
-        charge.append(c_tr); discharge.append(d_tr)
-        comp.append(c_k); chw_pri.append(chw_p_k); chw_sec.append(chw_s_k); cw.append(cw_k); ct.append(ct_k)
+        op_tr.append(load)
+        c_tr.append(c_val)
+        d_tr.append(d_val)
+        comp_kw.append(c_k)
+        pump_kw.append(p_k)
         
-    tot_kw = np.array(comp) + np.array(chw_pri) + np.array(chw_sec) + np.array(cw) + np.array(ct)
-    water_m3 = calc_water_consumption_m3(np.array(op_chiller_tr), is_air_cooled=is_ac, running_days=running_days)
+    total_kw = np.array(comp_kw) + np.array(pump_kw)
+    hourly_cost = total_kw * tariffs
     
     return {
-        "cooling_tr": load_24, "charge_tr": charge, "discharge_tr": discharge, "op_chiller_tr": op_chiller_tr,
-        "loading_factor": loading_factor, "comp_kw": comp, "chw_pri_kw": chw_pri, "chw_sec_kw": chw_sec,
-        "cw_pump_kw": cw, "ct_fan_kw": ct, "total_kw": tot_kw, "tariff": tar_24, "hourly_cost": tot_kw * tar_24,
-        "annual_opex": np.sum(tot_kw * tar_24) * running_days, "water_m3": water_m3
+        "op_tr": np.array(op_tr),
+        "charge_tr": np.array(c_tr),
+        "discharge_tr": np.array(d_tr),
+        "comp_kw": np.array(comp_kw),
+        "pump_kw": np.array(pump_kw),
+        "total_kw": total_kw,
+        "hourly_cost": hourly_cost,
+        "daily_opex": np.sum(hourly_cost),
+        "annual_opex": np.sum(hourly_cost) * 365.0,
+        "mode": mode
     }
